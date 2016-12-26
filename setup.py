@@ -1,18 +1,18 @@
+from distutils.command.build_ext import build_ext
 from distutils.core import setup
 from distutils.extension import Extension
-from distutils.command.build_ext import build_ext
+
+from Cython.Build import cythonize
 
 extra_compile_args = {
-    #'msvc': ['/EHsc', '/wd4146'],
+    'msvc': ['/EHsc', '/wd4146'],
     'gcc': ['-Wno-unused-function', '-Wno-unneeded-internal-declaration'],
-    #'gcc': [],
 }
 
 extra_libraries = {
     'gcc': [],
 }
 
-from Cython.Build import cythonize
 ext_modules = cythonize([
     Extension(
         'c_data_model',

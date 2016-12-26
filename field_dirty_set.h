@@ -12,26 +12,58 @@ private:
 private:
     std::bitset<BASE_FIELDS_COUNT> base_fields;
     FieldSet extra_fields;
+    int dirty_count;
 public:
-    bool is_dirty(FieldIdx f) {
+    FieldDirtySet(): dirty_count(0) {}
+
+    bool is_field_dirty(FieldIdx f) {
         if (f < BASE_FIELDS_COUNT) {
             return base_fields[f];
         } else {
             return extra_fields.find(f) != extra_fields.end();
         }
     }
-    void set_dirty(FieldIdx f, bool value) {
+
+    bool has_any_dirty() {
+        return dirty_count > 0;
+    }
+
+    bool _set_field_dirty(FieldIdx f, bool value) {
         if (f < BASE_FIELDS_COUNT) {
-            base_fields[f] = value;
+            if (base_fields[f] != value) {
+                base_fields[f] = value;
+                return true;
+            }
         } else {
-            extra_fields.insert(f);
+            bool cur_value = (extra_fields.find(f) != extra_fields.end());
+            if (cur_value != value) {
+                if (value) {
+                    extra_fields.insert(f);
+                } else {
+                    extra_fields.erase(f);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void set_field_dirty(FieldIdx f) {
+        if (_set_field_dirty(f, true)) {
+            dirty_count ++;
         }
     }
-    void clear_dirty(FieldIdx f) {
-		set_dirty(f, false);
+
+    void clear_field_dirty(FieldIdx f) {
+        if (_set_field_dirty(f, false)) {
+            dirty_count --;
+        }
 	}
-    void clear_all() {
+
+    void clear_all_dirty() {
         base_fields.reset();
         extra_fields.clear();
+        dirty_count = 0;
     }
+
 };

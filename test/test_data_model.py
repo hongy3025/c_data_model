@@ -1,21 +1,25 @@
 # encoding=utf-8
 
 import sys
+sys.path.insert(0, '.')
+
 import os
 
 import pytest
 import pprint
-from c_data_model import *
+
 from traceback import print_exc
+
+from c_data_model import *
 
 class Point(DataModel):
     x = Field('int32', 1, arithm=True, min_value=-1, conf_name='xx')
     y = Field('uint32', 2, arithm=True, conf_name='yy')
 
+
 class Point2(DataModel):
     x = Field('int32', 1, arithm=True, min_value=-1, conf_name='xx')
     y = Field('uint32', 2, arithm=True, conf_name='yy')
-
 
 
 class Rect(DataModel):
@@ -381,7 +385,7 @@ class Rect(DataModel):
 #     coord = Coord()
 #     print 'coord.x', coord.x
 #     assert coord.x == 100
-# 
+#
 
 def test_base_1():
     p = Point(x=1, y=2)
@@ -402,14 +406,14 @@ def test_base_usage():
 
     out1 = rect.pack_to_dict()
     print 'out1', out1
-    assert(out1 == {'lt': {'y': 1, 'x': 20}, 'rb': {'x': 100, 'y': 101}})
+    assert out1 == {'lt': {'y': 1, 'x': 20}, 'rb': {'x': 100, 'y': 101}}
 
     rect2 = Rect()
     rect2.unpack_from_dict(out1)
-    assert(rect2.lt.x == 20)
-    assert(rect2.lt.y == 1)
-    assert(rect2.rb.x == 100)
-    assert(rect2.rb.y == 101)
+    assert rect2.lt.x == 20
+    assert rect2.lt.y == 1
+    assert rect2.rb.x == 100
+    assert rect2.rb.y == 101
     print 'rect2.lt', rect2.lt.x, rect2.lt.y
     print 'rect2.rb', rect2.rb.x, rect2.rb.y
 
@@ -436,3 +440,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

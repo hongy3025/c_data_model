@@ -122,10 +122,11 @@ cimport cython_metaclass
 cdef extern from "field_dirty_set.h":
     ctypedef unsigned short FieldIdx
     cdef cppclass FieldDirtySet:
-        bint is_dirty(FieldIdx f)
-        void set_dirty(FieldIdx f, bint value)
-        void clear_dirty(FieldIdx f)
-        void clear_all()
+        bint is_field_dirty(FieldIdx f)
+        bint has_any_dirty()
+        void set_field_dirty(FieldIdx f)
+        void clear_field_dirty(FieldIdx f)
+        void clear_all_dirty()
 
 ctypedef long long int64
 ctypedef unsigned long long uint64
@@ -208,6 +209,7 @@ cdef dict _string2value = {
 }
 
 cdef set _int_types = set(('int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64'))
+
 cdef set _unsigned_int_types = set(('uint8', 'uint16', 'uint32', 'uint64'))
 
 
@@ -280,7 +282,7 @@ cdef inline str _value_short_repr(object value):
     return info
 
 
-cdef str make_autogen_func_name(attrs, str op_prefix, str name):
+cdef inline str make_autogen_func_name(attrs, str op_prefix, str name):
     func_name = op_prefix + '_' + name
     if func_name in attrs:
         func_name = '_' + op_prefix + '_' + name
@@ -344,60 +346,68 @@ cdef inline object _dict_get_decoder(str type_name):
     return None
 
 
-cdef inline void _mark_changed(int field_index, object self):
-    _mark_changed_self_dict(field_index, self.__dict__)
+# DDDD
+#cdef inline void _mark_changed(int field_index, object self):
+    #_mark_changed_self_dict(field_index, self.__dict__)
 
 
-cdef inline void _try_set_changed(object v):
-    if isinstance(v, (DataModel, Array, Map)):
-        v.set_changed()
+# DDDD
+#cdef inline void _try_set_changed(object v):
+    #if isinstance(v, (DataModel, Array, Map)):
+        #v.set_changed()
 
 
-cdef inline void _broadcast_changed(object v):
-    if isinstance(v, Array):
-        (<Array>v).broadcast_changed()
-    elif isinstance(v, Map):
-        (<Map>v).broadcast_changed()
+cdef inline void _broadcast_changed(object obj):
+    if isinstance(obj, Array):
+        (<Array>obj).broadcast_changed()
+    elif isinstance(obj, Map):
+        (<Map>obj).broadcast_changed()
 
 
-cdef inline void _container_clear_changed(Field field, object v, bint recursive):
+cdef inline void _container_clear_changed(Field field, object obj, bint recursive):
     if field.array:
-        (<Array>v)._clear_changed(recursive)
+        (<Array>obj)._clear_changed(recursive)
     elif field.map or field.id_map:
-        (<Map>v)._clear_changed(recursive)
+        (<Map>obj)._clear_changed(recursive)
 
 
-cdef inline bint _try_clear_changed(Field field, object v, bint recursive):
+cdef inline void _container_try_clear_changed(Field field, object obj, bint recursive):
     if field.is_container():
-        _container_clear_changed(field, v, recursive)
+        _container_clear_changed(field, obj, recursive)
     elif field.is_data_model_type():
-        (<DataModel>v)._clear_changed(None, recursive)
+        (<DataModel>obj)._clear_changed(None, recursive)
 
 
-cdef inline void _mark_changed_self_dict(int field_index, dict self_dict):
-    cdef set changed_set = self_dict.setdefault('__changed_set__', set())
-    changed_set.add(field_index)
+cdef inline bint _container_has_changed(Field field, object obj, bint recursive):
+    if field.array:
+        (<Array>obj)._has_changed(recursive)
+    elif field.map or field.id_map:
+        (<Map>obj)._has_changed(recursive)
 
 
-cdef void _set_changed(object self, tuple field_names):
-    cdef set change_set
-    cdef dict _fields_by_name
-    cdef str name
-    cdef Field field
-
-    if len(field_names) == 0:
-        changed_set = self.__dict__.setdefault('__changed_set__', set())
-        changed_set.add('*')
-        return
-    changed_set = self.__dict__.setdefault('__changed_set__', set())
-    _fields_by_name = self._fields_by_name
-    for name in field_names:
-        field = _fields_by_name.get(name)
-        if not field:
-            raise NoFieldError('no such field: %s' % name)
-        index = field.index
-        changed_set.add(index)
-
+# cdef inline void _mark_changed_self_dict(int field_index, dict self_dict):
+#     cdef set changed_set = self_dict.setdefault('__changed_set__', set())
+#     changed_set.add(field_index)
+# 
+# cdef void _set_changed(object self, tuple field_names):
+#     cdef set change_set
+#     cdef dict _fields_by_name
+#     cdef str name
+#     cdef Field field
+# 
+#     if len(field_names) == 0:
+#         changed_set = self.__dict__.setdefault('__changed_set__', set())
+#         changed_set.add('*')
+#         return
+#     changed_set = self.__dict__.setdefault('__changed_set__', set())
+#     _fields_by_name = self._fields_by_name
+#     for name in field_names:
+#         field = _fields_by_name.get(name)
+#         if not field:
+#             raise NoFieldError('no such field: %s' % name)
+#         index = field.index
+#         changed_set.add(index)
+# 
 #
 # cdef void _clear_field_changed(object self, Field field, dict self_dict, bint recursive):
 #     if not _can_clear_change(self, field):
@@ -446,66 +456,63 @@ cdef void _set_changed(object self, tuple field_names):
 #             _clear_field_changed(self, field, self_dict, recursive)
 
 
-cdef bint _has_field_changed(object self, Field field, bint recursive):
-    if field.skip_changed:
-        return False
+# cdef bint _has_field_changed(object self, Field field, bint recursive):
+#     if field.skip_changed:
+#         return False
+# 
+#     cdef dict self_dict = self.__dict__
+#     _fields_is_container = self._fields_is_container
+#     cdef set changed_set = self_dict.get('__changed_set__')
+# 
+#     if changed_set and ('*' in changed_set):
+#         return True
+# 
+#     cdef int field_index = field.index
+#     cdef str field_key = field.key
+#     cdef str field_name = field.name
+# 
+#     if _fields_is_container and (field_name in _fields_is_container):
+#         if changed_set and (field_index in changed_set):
+#             return True
+#         else:
+#             value = self_dict.get(field_key)
+#             if value is not None:
+#                 if field.ref:
+#                     return value.has_changed(False)
+#                 else:
+#                     return value.has_changed(recursive)
+#     elif field.is_data_model_type() and (not field.ref):
+#         if changed_set and (field_index in changed_set):
+#             return True
+#         if recursive:
+#             value = self_dict.get(field_key)
+#             if value is not None:
+#                 return _has_changed(value, recursive)
+#     else:
+#         if changed_set and (field_index in changed_set):
+#             return True
+# 
+#     return False
 
-    cdef dict self_dict = self.__dict__
-    _fields_is_container = self._fields_is_container
-    cdef set changed_set = self_dict.get('__changed_set__')
-
-    if changed_set and ('*' in changed_set):
-        return True
-
-    cdef int field_index = field.index
-    cdef str field_key = field.key
-    cdef str field_name = field.name
-
-    if _fields_is_container and (field_name in _fields_is_container):
-        if changed_set and (field_index in changed_set):
-            return True
-        else:
-            value = self_dict.get(field_key)
-            if value is not None:
-                if field.ref:
-                    return value.has_changed(False)
-                else:
-                    return value.has_changed(recursive)
-    elif field.is_data_model_type() and (not field.ref):
-        if changed_set and (field_index in changed_set):
-            return True
-        if recursive:
-            value = self_dict.get(field_key)
-            if value is not None:
-                return _has_changed(value, recursive)
-    else:
-        if changed_set and (field_index in changed_set):
-            return True
-
-    return False
-
-
-cdef inline bint _can_clear_change(object self, Field field):
-    if field.skip_changed:
-        return False
-    return True
-
-
-cdef inline bint _has_changed(object self, bint recursive=False):
-    cdef Field field
-    for field in self._fields:
-        if _has_field_changed(self, field, recursive):
-            return True
-    return False
-
-
-cdef inline bint _is_default_value(object self, str name):
-    cdef Field field = self._fields_by_name.get(name)
-    if not field:
-        raise NoFieldError('no such field: %s' % name)
-    cdef str key = field.key
-    return self.__dict__.get(key) is None
-
+# cdef inline bint _can_clear_change(object self, Field field):
+#     if field.skip_changed:
+#         return False
+#     return True
+# 
+# cdef inline bint _has_changed(object self, bint recursive=False):
+#     cdef Field field
+#     for field in self._fields:
+#         if _has_field_changed(self, field, recursive):
+#             return True
+#     return False
+# 
+# cdef inline bint _is_default_value(object self, str name):
+#     cdef Field field = self._fields_by_name.get(name)
+#     if not field:
+#         raise NoFieldError('no such field: %s' % name)
+#     cdef str key = field.key
+#     return self.__dict__.get(key) is None
+# 
 
 cdef object make_fget(Field field):
     def fget(object self):
@@ -569,18 +576,19 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
     cdef Map map_value
     cdef bint have_data = False if only_changed else True
     cdef object fvalue
+    cdef DataModel dm_obj = <DataModel>obj
 
     for field in protocol.fields_define.fields:
         value = obj_dict.get(field.key)
         if value is None:
             continue
 
-        if field_filter:
+        if field_filter is not None:
             if not field_filter(field):
                 continue
 
         if only_changed:
-            if not _has_field_changed(obj, field, recursive):
+            if dm_obj._has_field_changed(obj, field, recursive):
                 continue
 
         encoder = field.dict_encoder
@@ -613,7 +621,7 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
                     d[key] = fvalue
                     have_data = True
             if only_changed:
-                for key in map_value._removed:
+                for key in map_value.removed:
                     d[key] = None
                     have_data = True
         elif field.id_map:
@@ -632,7 +640,7 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
                     have_data = True
                 d[key] = fvalue
             if only_changed:
-                for key in value._removed:
+                for key in value.removed:
                     d[key] = None
                     have_data = True
         else:
@@ -814,11 +822,12 @@ cdef class DecodeContext(object):
         self.known_objects[oid] = obj
 
 
-    cdef add_unsolved_ref(self, data):
+    cdef void add_unsolved_ref(self, data):
         self.tmp_unsolved_ref.append(data)
 
 
-    cdef resolve_ref(self):
+    cdef void resolve_ref(self):
+        cdef dict container
         resolve_ref_func = self.resolve_ref_func
         if resolve_ref_func is not None:
             for _, container, k, v in self.tmp_unsolved_ref:
@@ -838,54 +847,52 @@ cdef class DecodeContext(object):
 
 
 cdef class Array(list):
-    cdef bint _changed
+    cdef Field field
+    cdef bint changed
 
 
     def __cinit__(self, *arg, **kwargs):
         list.__init__(self, *arg, **kwargs)
-        self._changed = False
+        self.changed = False
 
 
-    cpdef set_changed(self):
-        self._changed = True
-
-
-    cpdef has_changed(self, recursive=False):
-        if self._changed:
-            return self._changed
-        #if recursive:
-            #for value in self:
-                #if _try_check_changed(value):
-                    #return True
+    cpdef bint _has_changed(self, recursive=False):
+        if self.changed:
+            return self.changed
+        if recursive:
+            for value in self:
+                if _container_item_check_changed(self.field, value, recursive):
+                    return True
         return False
 
 
-    cdef _clear_changed(self, recursive=False):
-        self._changed = False
-        # if recursive:
-        #     for value in self:
-        #         _try_clear_changed(value)
+    cdef void _clear_changed(self, bint recursive=False):
+        self.changed = False
+        if recursive:
+            for value in self:
+                 _container_item_clear_changed(self.field, value, recursive)
 
 
-    def clear_changed(self, recursive=False):
-        self._clear_changed(recursive)
+    cdef void _broadcast_changed(self, bint recursive):
+        for v in self:
+            _container_item_mark_changed(self.field, v, recursive)
 
 
     def __setitem__(self, k, v):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         list.__setitem__(self, k, v)
 
 
     def __delitem__(self, k):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         list.__delitem__(self, k)
 
 
     def __iadd__(self, other):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         return list.__iadd__(self, other)
 
 
@@ -894,8 +901,8 @@ cdef class Array(list):
 
 
     def append(self, v):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         return list.append(self, v)
 
 
@@ -904,20 +911,20 @@ cdef class Array(list):
 
 
     def extend(self, v):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         return list.extend(self, v)
 
 
     def insert(self, k, v):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         return list.insert(self, k, v)
 
 
     def pop(self, k=None):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         if k is None:
             return list.pop(self)
         else:
@@ -925,106 +932,99 @@ cdef class Array(list):
 
 
     def remove(self, x):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         return list.remove(self, x)
 
 
     def sort(self, *arg, **kwargs):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         return list.sort(self, *arg, **kwargs)
 
 
-    cdef broadcast_changed(self):
-        for v in self:
-            _try_set_changed(v)
-
-
 cdef class Map(dict):
-    cdef set _removed
-    cdef bint _changed
+    cdef Field field
+    cdef set removed
+    cdef bint changed
 
 
     def __cinit__(self, *arg, **kwargs):
         dict.__init__(self, *arg, **kwargs)
-        self._removed = set()
-        self._changed = False
+        self.removed = set()
+        self.changed = False
 
 
-    cpdef void set_changed(self):
-        self._changed = True
-
-
-    cpdef bint has_changed(self, bint recursive=False):
-        if self._changed:
-            return self._changed
-        #if recursive:
-            #for value in self.itervalues():
-                #if _try_check_changed(value):
-                    #return True
+    cpdef bint _has_changed(self, bint recursive=False):
+        if self.changed:
+            return self.changed
+        if recursive:
+            for value in self.itervalues():
+                if _container_item_check_changed(self.field, value):
+                    return True
         return False
 
 
     cdef inline void _clear_changed(self, bint recursive=False):
-        self._changed = False
-        self._removed.clear()
-        #if recursive:
-            #for value in self.itervalues():
-                #_try_clear_changed(value)
+        self.changed = False
+        self.removed.clear()
+        if recursive:
+            for value in self.itervalues():
+                _container_item_clear_changed(self.field, value, recursive)
+
+
+    cdef void _broadcast_changed(self, bint recursive):
+        for v in self.itervalues():
+            _container_item_mark_changed(self.field, v, recursive)
 
 
     def __setitem__(self, k, v):
-        self._changed = True
-        _try_set_changed(v)
+        self.changed = True
+        _container_item_mark_changed(self.field, v, False)
         dict.__setitem__(self, k, v)
 
 
     def __delitem__(self, k):
-        self._changed = True
-        self._removed.add(k)
+        self.changed = True
+        self.removed.add(k)
         dict.__delitem__(self, k)
 
 
-    def _setitem(self, k, v):
-        dict.__setitem__(self, k, v)
+    #def _setitem(self, k, v):
+    #    dict.__setitem__(self, k, v)
 
 
     def clear(self):
-        self._changed = True
-        self._removed.update(self.iterkeys())
+        self.changed = True
+        self.removed.update(self.iterkeys())
         return dict.clear(self)
 
 
     def pop(self, key, *args, **kwargs):
-        self._changed = True
-        self._removed.add(key)
+        self.changed = True
+        self.removed.add(key)
         return dict.pop(self, key, *args, **kwargs)
 
 
     def popitem(self):
-        self._changed = True
+        self.changed = True
         key, value = dict.popitem(self)
-        self._removed.add(key)
+        self.removed.add(key)
         return (key, value)
 
 
     def setdefault(self, key, default=None):
-        self._changed = True
+        self.changed = True
         if default is None:
             default = self.value_field.value_type()
         return dict.setdefault(self, key, default)
 
 
     def update(self, *arg, **kwargs):
-        self._changed = True
-        self.broadcast_changed()
+        self.changed = True
+        self._broadcast_changed(False)
         return dict.update(self, *arg, **kwargs)
 
-
-    cdef broadcast_changed(self):
-        for v in self.itervalues():
-            _try_set_changed(v)
 
 
 class IdMap(Map):
@@ -1033,7 +1033,7 @@ class IdMap(Map):
 
     def remove(self, obj):
         key = obj.oid
-        self._removed.add(key)
+        self.removed.add(key)
         del self[key]
 
     def has(self, obj):
@@ -1408,6 +1408,18 @@ cdef class DataModelProtocol:
     cdef object cls
     cdef str cls_name
 
+    cdef bint has_object_children_changed(self, object obj, bint recursive):
+        cdef Field field
+        cdef DataModel dm_child
+        cdef dict obj_dict = obj.__dict__
+        cdef object child
+        for field in self.fields_define.fields:
+            child = obj_dict.get(field.key)
+            if child is not None:
+                dm_child = <DataModel>child
+                if dm_child._has_field_changed(field, child.__dict__, recursive):
+                    return True
+        return False
 
 
 cdef class MetaDataModel(type):
@@ -1510,10 +1522,6 @@ cdef class DataModel(object):
         self._set_data(kwargs)
 
 
-    def set_data(self, **kwargs):
-        self._set_data(kwargs)
-
-
     cdef void _set_data(self, kwargs):
         if not kwargs:
             return
@@ -1529,23 +1537,14 @@ cdef class DataModel(object):
                 obj_dict[name] = value
 
 
-    def has_changed(self, field_name=None, recursive=False):
-        if field_name:
-            field = self._fields_by_name.get(field_name)
-            if field is None:
-                raise NoFieldError('no such field: %s' % field_name)
-            return _has_field_changed(self, field, recursive)
-        else:
-            return _has_changed(self, recursive)
-
-
     cdef void _clear_field_changed(self, dict self_dict, Field field,
                                    bint recursive,
                                    bint clear_self_changed_set=True):
+        cdef DataModel dm_value
         if not field.key in self_dict:
             return
         if clear_self_changed_set:
-            self.changed_set.clear_dirty(field.index)
+            self.changed_set.clear_field_dirty(field.index)
         if recursive:
             value = self_dict.get(field.key)
             if field.is_container():
@@ -1555,49 +1554,65 @@ cdef class DataModel(object):
                 dm_value._clear_changed(None, recursive)
 
 
+    cdef bint _has_field_changed(self, Field field, dict self_dict,
+                                 bint recursive):
+        if field.skip_changed:
+            return False
+
+        if self.changed_set.has_any_dirty():
+            return True
+
+        cdef object value
+        cdef DataModelProtocol protocol
+
+        if field.is_container():
+            if self.changed_set.is_field_dirty(field.index):
+                return True
+            if recursive:
+                value = self_dict.get(field.key)
+                if value is not None:
+                    if field.ref:
+                        return _container_has_changed(field, value, False)
+                    else:
+                        return _container_has_changed(field, value, recursive)
+            return False
+
+        if field.is_data_model_type() and (not field.ref):
+            if self.changed_set.is_field_dirty(field.index):
+                return True
+            if recursive:
+                value = self_dict.get(field.key)
+                if value is not None:
+                    protocol = field.data_model_protocol
+                    return protocol.has_object_children_changed(value, recursive)
+            return False
+
+        if self.changed_set.is_field_dirty(field.index):
+            return True
+
+        return False
+
+
     cdef void _clear_changed(self, object field_names, bint recursive):
         cdef Field field
-        cdef dict self_dict
         cdef object value
         cdef DataModel dm_value
         cdef str field_name
         cdef int field_index
-
+        cdef dict self_dict = self.__dict__
         if field_names is None:
-            self.changed_set.clear_all()
+            self.changed_set.clear_all_dirty()
             if recursive:
-                self_dict = self.__dict__
                 for field in self.protocol.fields_define.fields:
                     self._clear_field_changed(self_dict, field, recursive, False)
         else:
-            self_dict = self.__dict__
             for field_name in field_names:
                 field = self.protocol.fields_define.fields_by_name.get(field_name)
                 self._clear_field_changed(self_dict, field, recursive, True)
 
 
-    def clear_changed(self, *field_names, **options):
-        cdef bint recursive
-        _recursive = options.get('recursive')
-        if _recursive is None:
-            recursive = True
-        elif _recursive:
-            recursive = True
-        else:
-            recursive = False
-        return self._clear_changed(field_names, recursive)
-
-
     cdef void _mark_field_changed(self, Field field):
-        self.changed_set.set_dirty(field.index, True)
-
-
-    def set_changed(self, *field_names):
-        return _set_changed(self, field_names)
-
-
-    def is_default_value(self, field_name):
-        return _is_default_value(self, field_name)
+        self.changed_set.set_field_dirty(field.index)
 
 
     def clear_data(self):
@@ -1605,52 +1620,6 @@ cdef class DataModel(object):
         for field in self._fields:
             if hasattr(self, field.key):
                 delattr(self, field.key)
-
-
-    def pack_to_dict(self, recursive=True,
-                     only_changed=False, clear_changed=False, field_filter=None):
-        cdef dict dict_data = {}
-        cdef DataModelProtocol protocol = self._get_protocol()
-        _encode_to_dict(dict_data, protocol, self,
-                        recursive=recursive,
-                        only_changed=only_changed,
-                        clear_changed=clear_changed,
-                        field_filter=field_filter)
-        return dict_data
-
-
-    def unpack_from_dict(self, dict src_dict_data, str mode=None, object resolve_ref=None, bint mark_change=False):
-        cdef DecodeContext context = DecodeContext(mode=mode, resolve_ref=resolve_ref, mark_change=mark_change)
-        cdef DataModelProtocol protocol = self._get_protocol()
-        _decode_from_dict(protocol, self, self.__dict__, src_dict_data, context)
-        context.resolve_ref()
-        return context.unsolved_ref
-
-
-    def get_changed_dict(self, recursive=False):
-        return self.pack_to_dict(recursive, only_changed=True)
-
-
-    def pack(self, fmt, *args, **kwargs):
-        if fmt == 'dict':
-            return self.pack_to_dict(*args, **kwargs)
-        else:
-            raise PackError('unsupported format: {}'.format(fmt))
-
-
-    def unpack(self, fmt, *args, **kwargs):
-        if fmt == 'dict':
-            return self.unpack_from_dict(*args, **kwargs)
-        else:
-            raise PackError('unsupported format: {}'.format(fmt))
-
-
-    def __str__(self):
-        return self._long_repr_()
-
-
-    def __repr__(self):
-        return self._long_repr_()
 
 
     cdef str _get_info_(self, int nfields):
@@ -1680,6 +1649,91 @@ cdef class DataModel(object):
 
     cdef str _long_repr_(self):
         return self._get_info_(4)
+
+
+    #----------------------------------------------------------------------
+
+    def set_data(self, **kwargs):
+        self._set_data(kwargs)
+
+
+    def has_changed(self, field_name=None, recursive=False):
+        if field_name:
+            field = self._fields_by_name.get(field_name)
+            if field is None:
+                raise NoFieldError('no such field: %s' % field_name)
+            return _has_field_changed(self, field, recursive)
+        else:
+            return _has_changed(self, recursive)
+
+
+    def get_changed_dict(self, recursive=False):
+        return self.pack_to_dict(recursive, only_changed=True)
+
+
+    def pack(self, fmt, *args, **kwargs):
+        if fmt == 'dict':
+            return self.pack_to_dict(*args, **kwargs)
+        else:
+            raise PackError('unsupported format: {}'.format(fmt))
+
+
+    def unpack(self, fmt, *args, **kwargs):
+        if fmt == 'dict':
+            return self.unpack_from_dict(*args, **kwargs)
+        else:
+            raise PackError('unsupported format: {}'.format(fmt))
+
+
+    def pack_to_dict(self, recursive=True,
+                     only_changed=False, clear_changed=False, field_filter=None):
+        cdef dict dict_data = {}
+        cdef DataModelProtocol protocol = self._get_protocol()
+        _encode_to_dict(dict_data, protocol, self,
+                        recursive=recursive,
+                        only_changed=only_changed,
+                        clear_changed=clear_changed,
+                        field_filter=field_filter)
+        return dict_data
+
+
+    def unpack_from_dict(self, dict src_dict_data, str mode=None, object resolve_ref=None, bint mark_change=False):
+        cdef DecodeContext context = DecodeContext(mode=mode, resolve_ref=resolve_ref, mark_change=mark_change)
+        cdef DataModelProtocol protocol = self._get_protocol()
+        _decode_from_dict(protocol, self, self.__dict__, src_dict_data, context)
+        context.resolve_ref()
+        return context.unsolved_ref
+
+
+    def clear_changed(self, *field_names, **options):
+        cdef bint recursive
+        _recursive = options.get('recursive')
+        if _recursive is None:
+            recursive = True
+        elif _recursive:
+            recursive = True
+        else:
+            recursive = False
+        return self._clear_changed(field_names, recursive)
+
+
+    def set_changed(self, *field_names):
+        #return _set_changed(self, field_names)
+        pass
+
+
+    def is_default_value(self, field_name):
+        #return _is_default_value(self, field_name)
+        return True
+
+
+    def __str__(self):
+        return self._long_repr_()
+
+
+    def __repr__(self):
+        return self._long_repr_()
+
 
 
 def ArrayField(*arg, **kwarg):
