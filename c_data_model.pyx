@@ -522,9 +522,12 @@ cdef object make_fget(Field field):
 
 cdef object make_fset(Field field):
     def fset(object self, object value):
-        if self.__dict__.get(field.key) != value:
-            self.__dict__[field.key] = value
-            _mark_changed(field.index, self)
+        cdef dict self_dict = self.__dict__
+        cdef DataModel dm_self
+        if self_dict.get(field.key) != value:
+            self_dict[field.key] = value
+            dm_self = <DataModel>self
+            dm_self._mark_field_changed(field)
     return fset
 
 
@@ -1559,9 +1562,6 @@ cdef class DataModel(object):
         if field.skip_changed:
             return False
 
-        if self.changed_set.has_any_dirty():
-            return True
-
         cdef object value
         cdef DataModelProtocol protocol
 
@@ -1643,6 +1643,19 @@ cdef class DataModel(object):
         return obj_info
 
 
+    cdef bint _has_changed(self, bint recursive):
+        if self.changed_set.has_any_dirty():
+            return True
+        cdef Field field
+        cdef dict self_dict
+        if recursive:
+            self_dict = self.__dict__
+            for field in self.protocol.fields_define.fields:
+                if self._has_field_changed(field, self_dict, recursive):
+                    return True
+        return False
+
+
     cdef str _short_repr_(self):
         return self._get_info_(2)
 
@@ -1658,13 +1671,14 @@ cdef class DataModel(object):
 
 
     def has_changed(self, field_name=None, recursive=False):
-        if field_name:
-            field = self._fields_by_name.get(field_name)
+        cdef Field field
+        if field_name is not None:
+            field = self.protocol.fields_define.fields_by_name.get(field_name)
             if field is None:
                 raise NoFieldError('no such field: %s' % field_name)
-            return _has_field_changed(self, field, recursive)
+            return self._has_field_changed(field, self.__dict__, recursive)
         else:
-            return _has_changed(self, recursive)
+            return self._has_changed(recursive)
 
 
     def get_changed_dict(self, recursive=False):
