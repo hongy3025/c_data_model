@@ -257,16 +257,19 @@ cdef inline object _key_decode_from_string(str type_name, object decode):
     return _converter
 
 
-cdef inline object _create_object(Field field, object cls, dict dict_data):
+cdef inline object _create_object(Field field, dict dict_data):
+    cdef object obj
     if field.create:
+        if dict_data is None:
+            dict_data = {}
         obj = field.create(dict_data)
     else:
-        obj = cls()
+        obj = field.data_model_protocol.cls()
     return obj
 
 
 cdef inline void _replace_obj_dict(object obj, dict new_obj_dict):
-    old_dict = obj.__dict__
+    cdef dict old_dict = obj.__dict__
     obj.__dict__ = new_obj_dict
     for k, v in old_dict.iteritems():
         if k not in new_obj_dict:
@@ -368,7 +371,7 @@ cdef inline bint _container_has_changed(Field field, object obj, bint recursive)
 
 
 cdef inline bint _container_item_has_changed(Field field, object item, bint recursive):
-    DataModel dm_item
+    cdef DataModel dm_item
     if field.is_data_model_type():
         dm_item = <DataModel>item
         return dm_item._has_changed(recursive)
@@ -376,14 +379,14 @@ cdef inline bint _container_item_has_changed(Field field, object item, bint recu
 
 
 cdef inline _container_item_clear_changed(Field field, object item, bint recursive):
-    DataModel dm_item
+    cdef DataModel dm_item
     if field.is_data_model_type():
         dm_item = <DataModel>item
         dm_item._clear_changed(None, recursive)
 
 
 cdef inline _container_item_set_changed(Field field, object item, bint recursive):
-    DataModel dm_item
+    cdef DataModel dm_item
     if field.is_data_model_type():
         dm_item = <DataModel>item
         dm_item._set_changed(recursive)
@@ -408,9 +411,12 @@ cdef object make_fset(Field field):
 
 cdef object make_fdel(Field field):
     def fdel(object self):
+        cdef DataModel dm_self
         if hasattr(self, Field.key):
             delattr(self, Field.key)
-        # TODO: set dirty ?
+            # FIXME: set dirty ?
+            dm_self = <DataModel>self
+            dm_self._mark_field_changed(field)
     return fdel
 
 
@@ -538,17 +544,19 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
 
 
 cdef inline object _field_value_from_dict(Field field, object decoder,
-                                          object dict_value, object old_value,
+                                          object src_dict_value, object old_value,
                                           DecodeContext context):
     if decoder:
-        return decoder(dict_value)
+        return decoder(src_dict_value)
     else:
-        return _field_object_from_dict(field, None, dict_value, old_value, context)
+        return _field_object_from_dict(field, None, src_dict_value, old_value, context)
 
 
-cdef _field_object_from_dict(Field field, oid, dict_value, old_value, DecodeContext context):
+cdef _field_object_from_dict(Field field, str oid, dict src_dict_value,
+                             object old_value, DecodeContext context):
+    cdef dict obj_dict
     if field.ref:
-        return field.dict_ref_decoder(dict_value)
+        return field.dict_ref_decoder(src_dict_value)
     else:
         if old_value is not None:
             fobj = old_value
@@ -556,14 +564,17 @@ cdef _field_object_from_dict(Field field, oid, dict_value, old_value, DecodeCont
         else:
             fobj = None
             obj_dict = {}
-        fcls = field.value_type
-        _decode_from_dict(fobj, fcls, obj_dict, dict_value, context)
+        _decode_from_dict(field.data_model_protocol,
+                          fobj,
+                          obj_dict,
+                          src_dict_value,
+                          context)
         if fobj is None:
-            fobj = _create_object(field, fcls, obj_dict)
+            fobj = _create_object(field, obj_dict)
             _replace_obj_dict(fobj, obj_dict)
 
         if oid is not None:
-            fobj._oid = oid
+            fobj.__dict__['_oid'] = oid
         else:
             oid = obj_dict.get('_oid')
         context.add_known_object(oid, fobj)
@@ -578,8 +589,6 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
         recursive       -> 是否递归子对象
         only_changed    -> 是否仅包含有改变的字段
     '''
-    mark_change = context.mark_change
-
     cdef Field field
     cdef object dvalue
     cdef object decoder
@@ -658,7 +667,7 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
             if field.ref:
                 context.add_unsolved_ref(('obj_dict', obj_dict, field.key, value))
 
-        if mark_change:
+        if context.mark_change and obj is not None:
             dm_obj = <DataModel>obj
             dm_obj._mark_field_changed(field)
 
@@ -838,7 +847,7 @@ cdef class Map(dict):
             return self.changed
         if recursive:
             for value in self.itervalues():
-                if _container_item_check_changed(self.field, value):
+                if _container_item_has_changed(self.field, value, recursive):
                     return True
         return False
 
@@ -853,12 +862,12 @@ cdef class Map(dict):
 
     cdef void _broadcast_changed(self, bint recursive):
         for v in self.itervalues():
-            _container_item_mark_changed(self.field, v, recursive)
+            _container_item_set_changed(self.field, v, recursive)
 
 
     def __setitem__(self, k, v):
         self.changed = True
-        _container_item_mark_changed(self.field, v, False)
+        _container_item_set_changed(self.field, v, False)
         dict.__setitem__(self, k, v)
 
 
@@ -868,8 +877,8 @@ cdef class Map(dict):
         dict.__delitem__(self, k)
 
 
-    #def _setitem(self, k, v):
-    #    dict.__setitem__(self, k, v)
+    cdef _raw_setitem(self, k, v):
+        dict.__setitem__(self, k, v)
 
 
     def clear(self):
@@ -905,7 +914,7 @@ cdef class Map(dict):
 
 
 
-class IdMap(Map):
+cdef class IdMap(Map):
     def add(self, obj):
         self[obj.oid] = obj
 
@@ -916,6 +925,33 @@ class IdMap(Map):
 
     def has(self, obj):
         return obj.oid in self
+
+
+cdef Array _new_array(Field field):
+    cdef Array v = Array()
+    v.field = field
+    return v
+
+
+cdef Map _new_map(Field field):
+    cdef Map v = Map()
+    v.field = field
+    return v
+
+cdef IdMap _new_id_map(Field field):
+    cdef IdMap v = IdMap()
+    v.field = field
+    return v
+
+
+cdef object _new_container(Field field):
+    if field.array:
+        return _new_array(field)
+    if field.map:
+        return _new_map(field)
+    if field.id_map:
+        return _new_id_map(field)
+    return None
 
 
 cdef class Field(object):
@@ -933,7 +969,6 @@ cdef class Field(object):
     cdef bint map
     cdef bint id_map
     cdef str key_type_name
-    cdef object container_class
 
     cdef bint arithm
     cdef bint has_min_value
@@ -995,7 +1030,6 @@ cdef class Field(object):
         self.key_type_name = key
         self.map = map
         self.id_map = id_map
-        self.container_class = None
         self.arithm = arithm
 
         self.has_min_value = False
@@ -1043,17 +1077,7 @@ cdef class Field(object):
         if [self, array, self.map, self.id_map].count(True) > 1:
             raise DefineError('conflicted properties: array, map, id_map')
 
-        if self.array:
-            self.container_class = type('Array_'+self.type_name,
-                                        (Array,), {'value_field': self})
-        elif self.map or self.id_map:
-            if self.map:
-                self.container_class = type('Map_'+self.type_name,
-                                            (Map,), {'value_field': self})
-            elif self.id_map:
-                self.container_class = type('IdMap_'+self.type_name,
-                                            (IdMap,), {'value_field': self})
-
+        if self.is_container():
             dict_key_encoder = _dict_get_encoder(self.key_type_name)
             assert dict_key_encoder
             self.dict_key_encoder = _key_encode_to_string(self.key_type_name, dict_key_encoder)
@@ -1064,7 +1088,7 @@ cdef class Field(object):
 
 
     cdef inline bint is_container(self):
-        return self.container_class is not None
+        return self.array or self.map or self.id_map
 
     def __str__(self):
         return '<%s name=%s, index=%d>' % (self.__class__.__name__, self.name, self.index)
@@ -1170,7 +1194,7 @@ cdef object make_get_func(Field field):
         def get_func(self):
             cdef dict d = self.__dict__
             if field.key not in d:
-                d[field.key] = field.data_model_value_type()
+                d[field.key] = _create_object(field, None)
             return d[field.key]
         return get_func
     else:
@@ -1250,20 +1274,19 @@ cdef object make_signed_sub_func(Field field):
 
 cdef object make_container_fget(Field field):
     def fget(object self):
-        return self.__dict__.setdefault(field.key, field.container_class())
+        cdef dict self_dict = self.__dict__
+        return self_dict.setdefault(field.key, _new_container(field))
     return fget
 
 
 cdef object make_container_fset(Field field):
     def fset(object self, object value):
-        if isinstance(value, field.container_class):
-            _broadcast_changed(value)
-            self.__dict__[field.key] = value
-        else:
-            value = field.container_class(value)
-            _broadcast_changed(value)
-            self.__dict__[field.key] = value
-        _mark_changed(field.index, self)
+        cdef dict self_dict = self.__dict__
+        cdef DataModel dm_self
+        if self_dict.get(field.key) is not value:
+            self_dict[field.key] = value
+            dm_self = <DataModel>self
+            dm_self._mark_field_changed(field)
     return fset
 
 
@@ -1271,14 +1294,6 @@ cdef object make_container_fdel(Field field):
     def fdel(object self):
         raise OperateError('cannot del a container field')
     return fdel
-
-cdef object make_container_get_func(Field field):
-    def get(object self):
-        cdef dict d = self.__dict__
-        if field.key not in d:
-            d[field.key] = field.container_class()
-        return d[field.key]
-    return get
 
 
 cdef class DataModelProtocol:
@@ -1298,6 +1313,9 @@ cdef class DataModelProtocol:
                 if dm_child._has_field_changed(field, child.__dict__, recursive):
                     return True
         return False
+
+    def __str__(self):
+        return '<DataModelProtocol of {}>'.format(str(self.cls))
 
 
 cdef class MetaDataModel(type):
@@ -1325,8 +1343,6 @@ cdef class MetaDataModel(type):
 
             field = _field
 
-            field.data_model_protocol = protocol
-
             key = '_' + name
             field.name = name
             field.key = key
@@ -1345,7 +1361,7 @@ cdef class MetaDataModel(type):
                 make_container_fdel(field)))
             get_func_name = make_autogen_func_name(attrs, 'get', field.name)
             setattr(cls, get_func_name,
-                PyMethod_New(make_container_get_func(field), None, cls))
+                PyMethod_New(make_container_fget(field), None, cls))
         else:
             setattr(cls, field.name, property(
                 make_fget(field),

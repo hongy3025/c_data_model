@@ -404,23 +404,30 @@ def test_base_usage():
     rect.rb = Point(x=100, y=101)
     rect.lt.x = 20
 
+    assert rect.lt.x == 20
+    assert rect.lt.y == 1
+    assert rect.rb.x == 100
+    assert rect.rb.y == 101
+
     out1 = rect.pack_to_dict()
-    print 'out1', out1
     assert out1 == {'lt': {'y': 1, 'x': 20}, 'rb': {'x': 100, 'y': 101}}
 
     rect2 = Rect()
     rect2.unpack_from_dict(out1)
+
+    print 'rect2.lt', rect2.lt.x, rect2.lt.y
+    print 'rect2.rb', rect2.rb.x, rect2.rb.y
+
     assert rect2.lt.x == 20
     assert rect2.lt.y == 1
     assert rect2.rb.x == 100
     assert rect2.rb.y == 101
-    print 'rect2.lt', rect2.lt.x, rect2.lt.y
-    print 'rect2.rb', rect2.rb.x, rect2.rb.y
+
 
 def main():
     try:
         test_base_1()
-        #test_base_usage()
+        test_base_usage()
         # test_changed()
         # test_changed_2()
         # test_array()
