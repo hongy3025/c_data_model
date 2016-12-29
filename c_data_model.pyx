@@ -405,7 +405,7 @@ cdef object make_fset(Field field):
         if self_dict.get(field.key) != value:
             self_dict[field.key] = value
             dm_self = <DataModel>self
-            dm_self._mark_field_changed(field)
+            dm_self._set_field_changed(field)
     return fset
 
 
@@ -416,7 +416,7 @@ cdef object make_fdel(Field field):
             delattr(self, Field.key)
             # FIXME: set dirty ?
             dm_self = <DataModel>self
-            dm_self._mark_field_changed(field)
+            dm_self._set_field_changed(field)
     return fdel
 
 
@@ -472,7 +472,7 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
                 continue
 
         if only_changed:
-            if dm_obj._has_field_changed(obj, field, recursive):
+            if not dm_obj._has_field_changed(field, obj_dict, recursive):
                 continue
 
         encoder = field.dict_encoder
@@ -669,7 +669,7 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
 
         if context.mark_change and obj is not None:
             dm_obj = <DataModel>obj
-            dm_obj._mark_field_changed(field)
+            dm_obj._set_field_changed(field)
 
 
 cdef class DecodeContext(object):
@@ -1071,13 +1071,13 @@ cdef class Field(object):
             self.dict_ref_encoder = value_field.dict_encoder
             self.dict_ref_decoder = value_field.dict_decoder
 
-        #if self.ref:
-        #    value_field = self.data_model_value_type._fields_by_name['oid']
-
         if [self, array, self.map, self.id_map].count(True) > 1:
             raise DefineError('conflicted properties: array, map, id_map')
 
-        if self.is_container():
+        cdef object dict_key_encoder
+        cdef object dict_key_decoder
+
+        if self.map or self.id_map:
             dict_key_encoder = _dict_get_encoder(self.key_type_name)
             assert dict_key_encoder
             self.dict_key_encoder = _key_encode_to_string(self.key_type_name, dict_key_encoder)
@@ -1286,7 +1286,7 @@ cdef object make_container_fset(Field field):
         if self_dict.get(field.key) is not value:
             self_dict[field.key] = value
             dm_self = <DataModel>self
-            dm_self._mark_field_changed(field)
+            dm_self._set_field_changed(field)
     return fset
 
 
@@ -1491,7 +1491,7 @@ cdef class DataModel(object):
         cdef str field_name
         cdef int field_index
         cdef dict self_dict = self.__dict__
-        if field_names is None:
+        if not field_names:
             self.changed_set.clear_all_dirty()
             if recursive:
                 for field in self.protocol.fields_define.fields:
@@ -1502,8 +1502,19 @@ cdef class DataModel(object):
                 self._clear_field_changed(self_dict, field, recursive, True)
 
 
-    cdef void _mark_field_changed(self, Field field):
+    cdef void _set_field_changed(self, Field field):
         self.changed_set.set_field_dirty(field.index)
+
+
+    cdef void _set_changed(self, object field_names):
+        cdef Field field
+        if not field_names:
+            for field in self.protocol.fields_define.fields:
+                self._set_field_changed(field)
+        else:
+            for field_name in field_names:
+                field = self.protocol.fields_define.fields_by_name.get(field_name)
+                self._set_field_changed(field)
 
 
     cdef str _get_info_(self, int nfields):
@@ -1573,10 +1584,6 @@ cdef class DataModel(object):
             return self._has_changed(recursive)
 
 
-    def get_changed_dict(self, recursive=False):
-        return self.pack_to_dict(recursive, only_changed=True)
-
-
     def pack(self, fmt, *args, **kwargs):
         if fmt == 'dict':
             return self.pack_to_dict(*args, **kwargs)
@@ -1624,8 +1631,7 @@ cdef class DataModel(object):
 
 
     def set_changed(self, *field_names):
-        #return _set_changed(self, field_names)
-        pass
+        self._set_changed(field_names)
 
 
     def is_default_value(self, field_name):

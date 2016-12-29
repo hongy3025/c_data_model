@@ -26,41 +26,42 @@ class Rect(DataModel):
     lt = Field(Point, 1)
     rb = Field(Point, 2)
 
-# class Box(DataModel):
-#     points = ArrayField(Point, 1)
-# 
-# class KeyPoints(DataModel):
-#     points = MapField(Point, 1, key='string')
-# 
-# class Coord(DataModel):
-#     oid = Field('string', 1)
-#     x   = Field('int32', 2, default=100)
-#     y   = Field('int32', 3, default=100)
-# 
-# class Scene(DataModel):
-#     coords  = MapField(Coord, 1, key='string')
-#     refs    = MapField(Coord, 2, key='string', ref=True)
-# 
-# class Scene2(DataModel):
-#     coords  = MapField(Coord, 1, key='string')
-#     refs    = MapField(Coord, 2, key='string', ref=True)
-#     point1  = Field(Point, 3)
-#     point2  = Field(Point, 4)
-# 
-#     def resolve_ref(self, ref):
-#         return self.coords.get(ref)
-# 
-# class Object(DataModel):
-#     oid  = Field('uint32', 1)
-#     name = Field('string', 2)
-# 
-#     def get_name(self):
-#         return 'my_get_name'
-# 
-# class Objects(DataModel):
-#     objects = IdMapField(Object, 1, key='uint32')
-# 
-# 
+class Box(DataModel):
+    points = ArrayField(Point, 1)
+
+
+class KeyPoints(DataModel):
+    points = MapField(Point, 1, key='string')
+
+class Coord(DataModel):
+    oid = Field('string', 1)
+    x   = Field('int32', 2, default=100)
+    y   = Field('int32', 3, default=100)
+
+class Scene(DataModel):
+    coords  = MapField(Coord, 1, key='string')
+    refs    = MapField(Coord, 2, key='string', ref=True)
+
+class Scene2(DataModel):
+    coords  = MapField(Coord, 1, key='string')
+    refs    = MapField(Coord, 2, key='string', ref=True)
+    point1  = Field(Point, 3)
+    point2  = Field(Point, 4)
+
+    def resolve_ref(self, ref):
+        return self.coords.get(ref)
+
+class Object(DataModel):
+    oid  = Field('uint32', 1)
+    name = Field('string', 2)
+
+    def get_name(self):
+        return 'my_get_name'
+
+class Objects(DataModel):
+    objects = IdMapField(Object, 1, key='uint32')
+
+
 # def test_array():
 #     b = Box()
 #     print 'b.points', type(b.points)
@@ -133,37 +134,44 @@ class Rect(DataModel):
 #     assert(b2.points[0].x == 1001)
 #     print 'b2.points[0].x', b2.points[0].x
 # 
-# def test_changed():
-#     p = Point(x=1)
-#     p.y = 2
-#     assert(p.__changed_set__ == set([2]))   # y is changed
-#     out = p.get_changed_dict()
-#     print 'changed_dict 1', out
-#     assert(out == {'y': 2})
-# 
-#     p.clear_changed()
-#     assert(p.__changed_set__ == set())
-#     out = p.get_changed_dict()
-#     print 'changed_dict 2', out
-#     assert(out == {})
-# 
-#     p.set_changed('x', 'y')
-#     assert(p.__changed_set__ == set([1, 2]))
-#     out = p.get_changed_dict()
-#     print 'changed_dict 3', out
-#     assert(out == {'x': 1, 'y': 2})
-# 
-#     p.clear_changed('y')
-#     assert(p.__changed_set__ == set([1]))
-#     out = p.get_changed_dict()
-#     print 'changed_dict 4', out
-#     assert(out == {'x': 1})
-# 
-#     p.clear_changed('x')
-#     assert(p.__changed_set__ == set())
-#     out = p.get_changed_dict()
-#     print 'changed_dict 5', out
-#     assert(out == {})
+def test_changed():
+    p = Point(x=1)
+    p.y = 2
+    assert p.has_changed('y')
+    out = p.pack_to_dict(only_changed=True)
+    print 'out 1', out
+    assert out == {'y': 2}
+
+    p.clear_changed()
+
+    assert not p.has_changed('x')
+    assert not p.has_changed('y')
+    assert not p.has_changed()
+
+    p.set_changed('x', 'y')
+
+    assert p.has_changed('x')
+    assert p.has_changed('y')
+    assert p.has_changed()
+
+    p.clear_changed('y')
+    out = p.pack_to_dict(only_changed=True)
+    print 'out 2', out
+    assert out == {'x': 1}
+
+    p.clear_changed()
+
+    p.set_changed()
+
+    assert p.has_changed('x')
+    assert p.has_changed('y')
+    assert p.has_changed()
+
+    p.clear_changed()
+    out = p.pack_to_dict(only_changed=True)
+    print 'out 3', out
+    assert out == {}
+
 # 
 # def test_changed_2():
 #     rect = Rect(lt=Point(x=1, y=1), rb=Point(x=2, y=2))
@@ -426,9 +434,9 @@ def test_base_usage():
 
 def main():
     try:
-        test_base_1()
-        test_base_usage()
-        # test_changed()
+        # test_base_1()
+        # test_base_usage()
+        test_changed()
         # test_changed_2()
         # test_array()
         # test_map()
