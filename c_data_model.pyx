@@ -349,11 +349,11 @@ cdef inline object _dict_get_decoder(str type_name):
     return None
 
 
-#DDD cdef inline void _broadcast_changed(object obj):
-#DDD     if isinstance(obj, Array):
-#DDD         (<Array>obj)._broadcast_changed()
-#DDD     elif isinstance(obj, Map):
-#DDD         (<Map>obj)._broadcast_changed()
+cdef inline void _container_copy_from(Field field, object obj, object src):
+    if field.array:
+        (<Array>obj)._copy_from(src)
+    elif field.map or field.id_map:
+        (<Map>obj)._copy_from(src)
 
 
 cdef inline void _container_clear_changed(Field field, object obj, bint recursive):
@@ -603,12 +603,12 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
         decoder = field.dict_decoder
         kdecoder = field.dict_key_decoder
         if field.array:
-            arr = obj_dict[field.key] = field.container_class()
+            arr = obj_dict[field.key] = _new_array(field)
             for dv in dvalue:
                 if not context.sync_mode:
                     if dv is None: # 数据容错：不解码为None的值
                         continue
-                value = _field_value_from_dict(decoder, field, dv, None, context)
+                value = _field_value_from_dict(field, decoder, dv, None, context)
                 arr._append(value)
                 if field.ref:
                     context.add_unsolved_ref(('array', arr, len(arr) - 1, value))
@@ -617,7 +617,7 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
             if context.sync_mode:
                 m = obj_dict.get(field.key)
             if m is None:
-                m = field.container_class()
+                m = _new_map(field)
                 obj_dict[field.key] = m
             for k, v in dvalue.iteritems():
                 if not context.sync_mode:
@@ -631,7 +631,7 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
                     continue
                 if context.sync_mode:
                     old_value = m.get(key)
-                value = _field_value_from_dict(decoder, field, v, old_value, context)
+                value = _field_value_from_dict(field, decoder, v, old_value, context)
                 m._setitem(key, value)
                 if field.ref:
                     context.add_unsolved_ref(('map', m, key, value))
@@ -640,7 +640,7 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
             if context.sync_mode:
                 m = obj_dict.get(field.key)
             if m is None:
-                m = field.container_class()
+                m = _new_id_map(field)
                 obj_dict[field.key] = m
             for k, v in dvalue.iteritems():
                 if not context.sync_mode:
@@ -765,6 +765,11 @@ cdef class Array(list):
             _container_item_set_changed(self.field, value, recursive)
 
 
+    cdef void _copy_from(self, object src):
+        for x in src:
+            list.append(self, x)
+
+
     def __setitem__(self, k, v):
         self.changed = True
         self._broadcast_changed(False)
@@ -793,8 +798,8 @@ cdef class Array(list):
         return list.append(self, v)
 
 
-    cpdef _append(self, v):
-        return list.append(self, v)
+    cpdef void _append(self, v):
+        list.append(self, v)
 
 
     def extend(self, v):
@@ -828,6 +833,9 @@ cdef class Array(list):
         self.changed = True
         self._broadcast_changed(False)
         return list.sort(self, *arg, **kwargs)
+
+    def has_changed(self, bint recursive=False):
+        return self._has_changed(recursive)
 
 
 cdef class Map(dict):
@@ -880,6 +888,9 @@ cdef class Map(dict):
     cdef _raw_setitem(self, k, v):
         dict.__setitem__(self, k, v)
 
+
+    cdef void _copy_from(self, object src):
+        dict.update(self, src)
 
     def clear(self):
         self.changed = True
@@ -952,6 +963,15 @@ cdef object _new_container(Field field):
     if field.id_map:
         return _new_id_map(field)
     return None
+
+
+cdef object _get_container_class(Field field):
+    if field.array:
+        return Array
+    if field.map:
+        return Map
+    if field.id_map:
+        return IdMap
 
 
 cdef class Field(object):
@@ -1283,8 +1303,16 @@ cdef object make_container_fset(Field field):
     def fset(object self, object value):
         cdef dict self_dict = self.__dict__
         cdef DataModel dm_self
+        cdef object container
+        cdef object container_class
         if self_dict.get(field.key) is not value:
-            self_dict[field.key] = value
+            container_class = _get_container_class(field)
+            if not isinstance(value, container_class):
+                container = _new_container(field)
+                self_dict[field.key] = container
+                _container_copy_from(field, container, value)
+            else:
+                self_dict[field.key] = value
             dm_self = <DataModel>self
             dm_self._set_field_changed(field)
     return fset
@@ -1301,18 +1329,6 @@ cdef class DataModelProtocol:
     cdef object cls
     cdef str cls_name
 
-    cdef bint has_object_children_changed(self, object obj, bint recursive):
-        cdef Field field
-        cdef DataModel dm_child
-        cdef dict obj_dict = obj.__dict__
-        cdef object child
-        for field in self.fields_define.fields:
-            child = obj_dict.get(field.key)
-            if child is not None:
-                dm_child = <DataModel>child
-                if dm_child._has_field_changed(field, child.__dict__, recursive):
-                    return True
-        return False
 
     def __str__(self):
         return '<DataModelProtocol of {}>'.format(str(self.cls))
@@ -1454,7 +1470,7 @@ cdef class DataModel(object):
             return False
 
         cdef object value
-        cdef DataModelProtocol protocol
+        cdef DataModel dm_obj
 
         if field.is_container():
             if self.changed_set.is_field_dirty(field.index):
@@ -1474,8 +1490,8 @@ cdef class DataModel(object):
             if recursive:
                 value = self_dict.get(field.key)
                 if value is not None:
-                    protocol = field.data_model_protocol
-                    return protocol.has_object_children_changed(value, recursive)
+                    dm_obj = <DataModel>value
+                    return dm_obj._has_changed(recursive)
             return False
 
         if self.changed_set.is_field_dirty(field.index):
@@ -1551,11 +1567,11 @@ cdef class DataModel(object):
         return False
 
 
-    cdef str _short_repr_(self):
+    cpdef str _short_repr_(self):
         return self._get_info_(2)
 
 
-    cdef str _long_repr_(self):
+    cpdef str _long_repr_(self):
         return self._get_info_(4)
 
 

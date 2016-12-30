@@ -62,35 +62,35 @@ class Objects(DataModel):
     objects = IdMapField(Object, 1, key='uint32')
 
 
-# def test_array():
-#     b = Box()
-#     print 'b.points', type(b.points)
-#     assert(isinstance(b.points, Array))
-# 
-#     b.points = [Point(x=i, y=i) for i in xrange(4)]
-#     assert(isinstance(b.points, Array))
-#     print 'typeof b.points', type(b.points)
-# 
-#     print 'has_changed 1 ', b.has_changed()
-#     assert(b.has_changed())
-# 
-#     out1 = b.pack_to_dict()
-#     for i in xrange(4):
-#         assert(out1['points'][i] == {'x': i, 'y': i})
-#     print 'out1', out1
-# 
-#     b3 = Box()
-#     b3.unpack_from_dict(out1)
-#     print 'typeof b3.points', type(b3.points)
-#     assert(isinstance(b3.points, Array))
-# 
-#     b.clear_changed()
-#     print 'has_changed 2 ', b.has_changed()
-#     assert(not b.has_changed())
-# 
-#     b.points[0] = Point(x=40, y=40)
-#     print 'has_changed 4 ', b.has_changed()
-#     assert(b.has_changed())
+def test_array():
+    b = Box()
+    print 'b.points', type(b.points)
+    assert isinstance(b.points, Array)
+
+    b.points = [Point(x=i, y=i) for i in xrange(4)]
+    print 'typeof b.points', type(b.points)
+    assert isinstance(b.points, Array)
+
+    print 'has_changed 1 ', b.has_changed()
+    assert b.has_changed()
+
+    out1 = b.pack_to_dict()
+    print 'out1', out1
+    for i in xrange(4):
+         assert(out1['points'][i] == {'x': i, 'y': i})
+
+    b3 = Box()
+    b3.unpack_from_dict(out1)
+    print 'typeof b3.points', type(b3.points), b3.points
+    assert isinstance(b3.points, Array)
+
+    b.clear_changed()
+    print 'has_changed 2 ', b.has_changed()
+    assert not b.has_changed()
+
+    b.points[0] = Point(x=40, y=40)
+    print 'has_changed 4 ', b.has_changed('points', recursive=True), b.has_changed(recursive=True), b.points.has_changed()
+    assert b.has_changed()
 # 
 #     b.clear_changed()
 #     b.points += [Point(x=50, y=50)]
@@ -172,14 +172,22 @@ def test_changed():
     print 'out 3', out
     assert out == {}
 
-# 
-# def test_changed_2():
-#     rect = Rect(lt=Point(x=1, y=1), rb=Point(x=2, y=2))
-#     rect.lt.x = 100
-#     rect.rb.y = 100
-#     out = rect.pack('dict', only_changed=True)
-#     print 'changed_dict 6', out
-# 
+
+def test_changed_2():
+    rect = Rect(lt=Point(x=1, y=1), rb=Point(x=2, y=2))
+    out = rect.pack_to_dict(only_changed=True)
+    print 'test_changed_2 1', out
+    assert out == {}
+    rect.lt.x = 100
+    rect.rb.y = 100
+    print 'x', rect.lt.x
+    print 'y', rect.rb.y
+    assert rect.lt.x == 100
+    assert rect.rb.y == 100
+    out = rect.pack_to_dict(only_changed=True)
+    print 'test_changed_2 2', out
+    assert out == {'lt': {'x': 100}, 'rb': {'y': 100}}
+
 # def test_duplicate_index():
 #     with pytest.raises(DuplicateIndexError):
 #         class Point3d(Point):
@@ -436,9 +444,9 @@ def main():
     try:
         # test_base_1()
         # test_base_usage()
-        test_changed()
+        # test_changed()
         # test_changed_2()
-        # test_array()
+        test_array()
         # test_map()
         # test_bin()
         # test_changed_3()
