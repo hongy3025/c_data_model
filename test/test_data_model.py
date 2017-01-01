@@ -89,51 +89,58 @@ def test_array():
     assert not b.has_changed()
 
     b.points[0] = Point(x=40, y=40)
-    print 'has_changed 4 ', b.has_changed('points', recursive=True), b.has_changed(recursive=True), b.points.has_changed()
-    assert b.has_changed()
-# 
-#     b.clear_changed()
-#     b.points += [Point(x=50, y=50)]
-#     print 'has_changed 5 ', b.has_changed()
-#     assert(b.has_changed())
-# 
-#     b.clear_changed()
-#     b.points.append(Point(x=60, y=60))
-#     print 'has_changed 6 ', b.has_changed()
-#     assert(b.has_changed())
-# 
-#     b.clear_changed()
-#     b.points.insert(0, Point(x=70, y=70))
-#     print 'has_changed 7 ', b.has_changed()
-#     assert(b.has_changed())
-# 
-#     b.clear_changed()
-#     b.points.pop(2)
-#     print 'has_changed 8 ', b.has_changed()
-#     assert(b.has_changed())
+    assert not b.has_changed()
+    assert b.has_changed(recursive=True)
+    assert b.has_changed('points', recursive=True)
+    assert b.points.has_changed()
+
+    b.clear_changed()
+    b.points += [Point(x=50, y=50)]
+    print 'has_changed 5 ', b.has_changed(recursive=True)
+    assert b.has_changed(recursive=True)
+
+
+    b.clear_changed()
+    b.points.append(Point(x=60, y=60))
+    print 'has_changed 6 ', b.has_changed(recursive=True)
+    assert b.has_changed(recursive=True)
+
+
+    b.clear_changed()
+    b.points.insert(0, Point(x=70, y=70))
+    print 'has_changed 7 ', b.has_changed(recursive=True)
+    assert b.has_changed(recursive=True)
+
+    b.clear_changed()
+    b.points.pop(2)
+    print 'has_changed 8 ', b.has_changed(recursive=True)
+    assert b.has_changed(recursive=True)
+
 # 
 #     print 'del b.points'
 #     with pytest.raises(OperateError):
 #         del b.points
 # 
-#     out2 = b.pack_to_dict()
-#     print 'out2', out2
-#     assert(out2 == {'points': [{'y': 70, 'x': 70}, {'y': 40, 'x': 40}, {'y': 2, 'x': 2}, {'y': 3, 'x': 3}, {'y': 50, 'x': 50}, {'y': 60, 'x': 60}]})
-# 
-#     b.clear_changed()
-#     b.points.sort(lambda a, b: cmp(a.x, b.x))
-#     print 'has_changed 9 ', b.has_changed()
-#     assert(b.has_changed())
-# 
-#     out2 = b.pack_to_dict()
-#     print 'out2', out2
-#     assert(out2 == {'points': [{'y': 2, 'x': 2}, {'y': 3, 'x': 3}, {'y': 40, 'x': 40}, {'y': 50, 'x': 50}, {'y': 60, 'x': 60}, {'y': 70, 'x': 70}]})
-# 
-#     b2 = Box()
-#     b2.points = [Point(x=1001)]
-#     assert(b2.points[0].x == 1001)
-#     print 'b2.points[0].x', b2.points[0].x
-# 
+
+    out2 = b.pack_to_dict()
+    print 'out2', out2
+    assert out2 == {'points': [{'y': 70, 'x': 70}, {'y': 40, 'x': 40}, {'y': 2, 'x': 2}, {'y': 3, 'x': 3}, {'y': 50, 'x': 50}, {'y': 60, 'x': 60}]}
+
+    b.clear_changed()
+    b.points.sort(lambda a, b: cmp(a.x, b.x))
+    print 'has_changed 9 ', b.has_changed(recursive=True)
+    assert b.has_changed(recursive=True)
+
+    out2 = b.pack_to_dict()
+    print 'out2', out2
+    assert out2 == {'points': [{'y': 2, 'x': 2}, {'y': 3, 'x': 3}, {'y': 40, 'x': 40}, {'y': 50, 'x': 50}, {'y': 60, 'x': 60}, {'y': 70, 'x': 70}]}
+
+    b2 = Box()
+    b2.points = [Point(x=1001)]
+    print 'b2.points[0].x', b2.points[0].x
+    assert b2.points[0].x == 1001
+
+
 def test_changed():
     p = Point(x=1)
     p.y = 2
@@ -202,62 +209,58 @@ def test_changed_2():
 #             y = Field('int32', 5)
 #             z = Field('int32', 6)
 # 
-# def test_map():
-#     kp = KeyPoints()
-#     assert(isinstance(kp.points, Map))
-#     kp.points['a'] = Point(x=1, y=2)
-#     assert(kp.points['a'].x == 1)
-#     out1 = kp.pack_to_dict()
-#     print 'out1', out1
-#     assert(out1 == {'points': {'a': {'y': 2, 'x': 1}}})
-# 
-#     kp2 = KeyPoints()
-#     kp2.unpack_from_dict(out1)
-#     assert(isinstance(kp2.points, Map))
-#     assert(kp2.points['a'].x == 1)
-#     out2 = kp2.pack_to_dict()
-#     print 'out2', out2
-#     assert(out2 == {'points': {'a': {'y': 2, 'x': 1}}})
-# 
-# def test_bin():
-#     p = Point(x=1, y=2)
-#     s1 = p.pack_to_binary()
-#     print 's1', repr(s1), len(s1)
-# 
-#     b = Box()
-#     b.points = [Point(x=i, y=i) for i in xrange(4)]
-#     s2 = b.pack_to_binary()
-#     print 's2', repr(s2), len(s2)
-# 
-# def test_changed_3():
-#     kp = KeyPoints()
-#     kp.points['a'] = Point(x=1, y=2)
-#     out = kp.pack('dict', only_changed=True)
-#     print 'out 1:'
-#     pprint.pprint(out, indent=2)
-#     assert(out == {'points': { 'a': { 'x': 1, 'y': 2}}})
-# 
-#     kp.clear_changed()
-# 
-#     kp.points['b'] = Point(x=3, y=4)
-#     out = kp.pack('dict', only_changed=True)
-#     print 'out 2:'
-#     pprint.pprint(out, indent=2)
-#     assert(out == {'points': { 'b': { 'x': 3, 'y': 4}}})
-# 
-#     kp.clear_changed()
-# 
-#     kp.points['c'] = Point(x=5, y=6)
-#     out = kp.pack('dict', only_changed=True, clear_changed=True)
-#     print 'out 3:'
-#     pprint.pprint(out, indent=2)
-#     assert(out == { 'points': {'c': { 'x': 5, 'y': 6}}})
-# 
-#     out = kp.pack('dict', only_changed=True)
-#     print 'out 4:', kp.has_changed()
-#     pprint.pprint(out, indent=2)
-#     assert(out == {})
-# 
+
+def test_map():
+    kp = KeyPoints()
+    assert isinstance(kp.points, Map)
+
+    kp.points['a'] = Point(x=1, y=2)
+    assert kp.points['a'].x == 1
+
+    out1 = kp.pack_to_dict()
+    print 'out1', out1
+    assert(out1 == {'points': {'a': {'y': 2, 'x': 1}}})
+
+    kp2 = KeyPoints()
+    kp2.unpack_from_dict(out1)
+    assert isinstance(kp2.points, Map)
+    print 'kp2', kp2
+    assert kp2.points['a'].x == 1
+
+    out2 = kp2.pack_to_dict()
+    print 'out2', out2
+    assert out2 == {'points': {'a': {'y': 2, 'x': 1}}}
+
+
+def test_changed_3():
+    kp = KeyPoints()
+    kp.points['a'] = Point(x=1, y=2)
+    out = kp.pack('dict', only_changed=True)
+    print 'out 1:'
+    pprint.pprint(out, indent=2)
+    assert out == {'points': { 'a': { 'x': 1, 'y': 2}}}
+
+    kp.clear_changed()
+
+    kp.points['b'] = Point(x=3, y=4)
+    out = kp.pack('dict', only_changed=True)
+    print 'out 2:'
+    pprint.pprint(out, indent=2)
+    assert out == {'points': { 'b': { 'x': 3, 'y': 4}}}
+
+    kp.clear_changed()
+
+    kp.points['c'] = Point(x=5, y=6)
+    out = kp.pack('dict', only_changed=True, clear_changed=True)
+    print 'out 3:'
+    pprint.pprint(out, indent=2)
+    assert out == { 'points': {'c': { 'x': 5, 'y': 6}}}
+
+    out = kp.pack('dict', only_changed=True)
+    print 'out 4:', kp.has_changed()
+    pprint.pprint(out, indent=2)
+    assert out == {}
+ 
 # def test_ref():
 #     s = Scene()
 # 
@@ -442,14 +445,13 @@ def test_base_usage():
 
 def main():
     try:
-        # test_base_1()
-        # test_base_usage()
-        # test_changed()
-        # test_changed_2()
+        test_base_1()
+        test_base_usage()
+        test_changed()
+        test_changed_2()
+        test_changed_3()
         test_array()
-        # test_map()
-        # test_bin()
-        # test_changed_3()
+        test_map()
         # test_ref()
         # test_ref_2()
         # test_id_map()

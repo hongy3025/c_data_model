@@ -365,9 +365,10 @@ cdef inline void _container_clear_changed(Field field, object obj, bint recursiv
 
 cdef inline bint _container_has_changed(Field field, object obj, bint recursive):
     if field.array:
-        (<Array>obj)._has_changed(recursive)
+        return (<Array>obj)._has_changed(recursive)
     elif field.map or field.id_map:
-        (<Map>obj)._has_changed(recursive)
+        return (<Map>obj)._has_changed(recursive)
+    return False
 
 
 cdef inline bint _container_item_has_changed(Field field, object item, bint recursive):
@@ -581,6 +582,83 @@ cdef _field_object_from_dict(Field field, str oid, dict src_dict_value,
         return fobj
 
 
+cdef void _decode_array_from_dict(Field field, dict obj_dict,
+                                  object dvalue, DecodeContext context):
+    cdef Array arr
+    cdef object dv
+    cdef object decoder = field.dict_decoder
+    arr = obj_dict[field.key] = _new_array(field)
+    for dv in dvalue:
+        if not context.sync_mode:
+            if dv is None: # 数据容错：不解码为None的值
+                continue
+        value = _field_value_from_dict(field, decoder, dv, None, context)
+        arr._append(value)
+        if field.ref:
+            context.add_unsolved_ref(('array', arr, len(arr) - 1, value))
+
+
+cdef void _decode_map_from_dict(Field field, dict obj_dict,
+                                object dvalue, DecodeContext context):
+    cdef Map m = None
+    cdef object decoder = field.dict_decoder
+    cdef object kdecoder = field.dict_key_decoder
+    cdef object old_value
+
+    if context.sync_mode:
+        m = obj_dict.get(field.key)
+    if m is None:
+        m = _new_map(field)
+        obj_dict[field.key] = m
+    for k, v in dvalue.iteritems():
+        if not context.sync_mode:
+            if v is None:
+                continue # 数据容错：不解码为None的值
+        old_value = None
+        key = kdecoder(k)
+        if context.sync_mode and v is None:
+            if key in m:
+                del m[key]
+            continue
+        if context.sync_mode:
+            old_value = m.get(key)
+        value = _field_value_from_dict(field, decoder, v, old_value, context)
+        m._raw_setitem(key, value)
+        if field.ref:
+            context.add_unsolved_ref(('map', m, key, value))
+
+
+cdef void _decode_idmap_from_dict(Field field, dict obj_dict,
+                                  object dvalue, DecodeContext context):
+    cdef IdMap idm = None
+    cdef object decoder = field.dict_decoder
+    cdef object kdecoder = field.dict_key_decoder
+    cdef object old_value
+
+    if context.sync_mode:
+        idm = obj_dict.get(field.key)
+    if idm is None:
+        idm = _new_id_map(field)
+        obj_dict[field.key] = idm
+    for k, v in dvalue.iteritems():
+        if not context.sync_mode:
+            if v is None:
+                continue # 数据容错：不解码为None的值
+        old_value = None
+        oid = kdecoder(k)
+        if context.sync_mode and v is None:
+            if oid in idm:
+                del idm[oid]
+            continue
+        if context.sync_mode:
+            old_value = idm.get(oid)
+        value = _field_object_from_dict(field, oid, v, old_value, context)
+        idm._raw_setitem(oid, value)
+        if field.ref:
+            context.add_unsolved_ref(('map', idm, oid, value))
+
+
+
 cdef void _decode_from_dict(DataModelProtocol protocol,
                             object obj, dict obj_dict,
                             dict src_dict_data,
@@ -591,10 +669,8 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
     '''
     cdef Field field
     cdef object dvalue
-    cdef object decoder
-    cdef object kdecoder
-    cdef object old_value
     cdef DataModel dm_obj
+    cdef object old_value
 
     for field in protocol.fields_define.fields:
         dvalue = src_dict_data.get(field.name)
@@ -603,61 +679,11 @@ cdef void _decode_from_dict(DataModelProtocol protocol,
         decoder = field.dict_decoder
         kdecoder = field.dict_key_decoder
         if field.array:
-            arr = obj_dict[field.key] = _new_array(field)
-            for dv in dvalue:
-                if not context.sync_mode:
-                    if dv is None: # 数据容错：不解码为None的值
-                        continue
-                value = _field_value_from_dict(field, decoder, dv, None, context)
-                arr._append(value)
-                if field.ref:
-                    context.add_unsolved_ref(('array', arr, len(arr) - 1, value))
+            _decode_array_from_dict(field, obj_dict, dvalue, context)
         elif field.map:
-            m = None
-            if context.sync_mode:
-                m = obj_dict.get(field.key)
-            if m is None:
-                m = _new_map(field)
-                obj_dict[field.key] = m
-            for k, v in dvalue.iteritems():
-                if not context.sync_mode:
-                    if v is None:
-                        continue # 数据容错：不解码为None的值
-                old_value = None
-                key = kdecoder(k)
-                if context.sync_mode and v is None:
-                    if key in m:
-                        del m[key]
-                    continue
-                if context.sync_mode:
-                    old_value = m.get(key)
-                value = _field_value_from_dict(field, decoder, v, old_value, context)
-                m._setitem(key, value)
-                if field.ref:
-                    context.add_unsolved_ref(('map', m, key, value))
+            _decode_map_from_dict(field, obj_dict, dvalue, context)
         elif field.id_map:
-            m = None
-            if context.sync_mode:
-                m = obj_dict.get(field.key)
-            if m is None:
-                m = _new_id_map(field)
-                obj_dict[field.key] = m
-            for k, v in dvalue.iteritems():
-                if not context.sync_mode:
-                    if v is None:
-                        continue # 数据容错：不解码为None的值
-                old_value = None
-                oid = kdecoder(k)
-                if context.sync_mode and v is None:
-                    if oid in m:
-                        del m[oid]
-                    continue
-                if context.sync_mode:
-                    old_value = m.get(oid)
-                value = _field_object_from_dict(field, oid, v, old_value, context)
-                m._setitem(oid, value)
-                if field.ref:
-                    context.add_unsolved_ref(('map', m, oid, value))
+            _decode_idmap_from_dict(field, obj_dict, dvalue, context)
         else:
             old_value = None
             if context.sync_mode:
@@ -745,7 +771,7 @@ cdef class Array(list):
 
     cpdef bint _has_changed(self, recursive=False):
         if self.changed:
-            return self.changed
+            return True
         if recursive:
             for value in self:
                 if _container_item_has_changed(self.field, value, recursive):
@@ -885,7 +911,7 @@ cdef class Map(dict):
         dict.__delitem__(self, k)
 
 
-    cdef _raw_setitem(self, k, v):
+    cdef void _raw_setitem(self, k, v):
         dict.__setitem__(self, k, v)
 
 
