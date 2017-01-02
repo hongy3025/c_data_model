@@ -248,8 +248,9 @@ def test_changed_3():
     pprint.pprint(out, indent=2)
     assert out == {'points': { 'b': { 'x': 3, 'y': 4}}}
 
-    kp.clear_changed()
 
+def test_clear_changed_1():
+    kp = KeyPoints()
     kp.points['c'] = Point(x=5, y=6)
     out = kp.pack('dict', only_changed=True, clear_changed=True)
     print 'out 3:'
@@ -257,154 +258,173 @@ def test_changed_3():
     assert out == { 'points': {'c': { 'x': 5, 'y': 6}}}
 
     out = kp.pack('dict', only_changed=True)
-    print 'out 4:', kp.has_changed()
+    print 'out 4:', kp.has_changed(recursive=True)
     pprint.pprint(out, indent=2)
     assert out == {}
- 
-# def test_ref():
-#     s = Scene()
-# 
-#     s.coords['a'] = Coord(oid='a', x=1, y=2)
-#     s.coords['b'] = Coord(oid='b', x=3, y=4)
-#     s.coords['c'] = Coord(oid='c', x=5, y=6)
-#     s.refs['1'] = s.coords['a']
-#     s.refs['2'] = s.coords['b']
-#     s.clear_changed()
-# 
-#     print 'out1:'
-#     out = s.pack('dict')
-#     pprint.pprint(out, indent=2)
-# 
-# def test_ref_2():
-#     s = Scene2()
-# 
-#     s.coords['a'] = Coord(oid='a', x=1, y=2)
-#     s.coords['b'] = Coord(oid='b', x=3, y=4)
-#     s.coords['c'] = Coord(oid='c', x=5, y=6)
-#     s.refs['1'] = s.coords['a']
-#     s.refs['2'] = s.coords['b']
-#     s.clear_changed()
-# 
-#     s_out = s.pack('dict')
-#     print 's:'
-#     pprint.pprint(s_out, indent=2)
-# 
-#     d = Scene2()
-#     d.unpack('dict', s_out)
-#     d_out = d.pack('dict')
-#     print 'd:'
-#     pprint.pprint(d_out, indent=2)
-# 
-#     assert(s_out == d_out)
-# 
-#     #------------------------------------------------------------------
-# 
-#     s.refs['3'] = s.coords['c']
-#     s_changed = s.pack('dict', only_changed=True)
-#     print 's_changed:'
-#     pprint.pprint(s_changed, indent=2)
-# 
-#     unsolved = d.unpack('dict', s_changed, mode='sync', resolve_ref=lambda ref: d.resolve_ref(ref))
-#     assert(not unsolved) # 确保所有引用都已经解析
-# 
-#     d_out = d.pack('dict')
-#     print 'd 2:'
-#     pprint.pprint(d_out, indent=2)
-#     assert(d_out == s.pack('dict'))
-# 
-#     s.clear_changed()
-# 
-#     s.point1 = Point(x=1, y=2)
-#     print 's 2:'
-#     diff = s.pack('dict', only_changed=True)
-#     pprint.pprint(diff, indent=2)
-# 
-#     s.clear_changed()
-# 
-#     s.coords['e'] = Coord(oid='e', x=11, y=12)
-#     print 's 3:'
-#     diff = s.pack('dict', only_changed=True)
-#     pprint.pprint(diff, indent=2)
-# 
-#     s.clear_changed()
-# 
-#     print 's has_changed:', s.has_changed()
-#     assert(not s.has_changed())
-# 
-#     print 's 4:'
-#     diff = s.pack('dict', only_changed=True)
-#     pprint.pprint(diff, indent=2)
-#     assert(diff == {})
-# 
-# def test_id_map():
-#     objects = Objects()
-#     objects.objects.add(Object(oid=1, name='name1'))
-#     objects.objects.add(Object(oid=2, name='name2'))
-#     print 'out 1:'
-#     out = objects.pack('dict')
-#     pprint.pprint(out, indent=2)
-# 
-#     # id_map不序列化oid字段。自动将整数key序列化为字符串类型。
-#     assert(out == { 'objects': { '1': { 'name': 'name1'}, '2': { 'name': 'name2'}}})
-# 
-#     objects_2 = Objects()
-#     objects_2.unpack('dict', out)
-#     # 反序列化后，对象内自动赋值oid字段。自动还原整数类型的key。
-#     assert(objects_2.objects[1].oid == 1)
-# 
-# def test_inherit():
-#     class PointX(DataModel):
-#         x = Field('int32', 1)
-# 
-#     class PointY(PointX):
-#         pass
-# 
-#     class PointZ(PointY):
-#         pass
-# 
-#     class PointA(PointZ):
-#         pass
-# 
-#     point = PointA(x=1)
-#     print 'out1', point.x
-#     assert(point.x == 1)
-# 
-# def test_auto_name():
-#     obj = Object()
-#     obj.name = 'the_name'
-#     assert obj.get_name() == 'my_get_name'
-#     obj._get_name()
-#     assert obj._get_name() == 'the_name'
-# 
-# def test_auto_func():
-#     pt = Point()
-#     pt.x = 1
-#     result = pt.add_x(3)
-#     print 'result 1', result
-#     assert result[0] == 3
-#     assert result[1] == 4
-#     result = pt.sub_x(1)
-#     print 'result 2', result
-#     assert result[0] == 1
-#     assert result[1] == 3
-#     pt.y = 3
-#     result = pt.sub_y(3)
-#     print 'result 3', result
-#     assert result[0] == 3
-#     assert result[1] == 0
-#     # result = pt.sub_y(1)
-#     # result = pt.sub_x(100)
-# 
-# 
-# def test_field_custom_param():
-#     for field in Point._fields:
-#         print 'field', field.conf_name
-# 
-# def test_default_value():
-#     coord = Coord()
-#     print 'coord.x', coord.x
-#     assert coord.x == 100
-#
+
+
+def test_ref():
+    s = Scene()
+
+    s.coords['a'] = Coord(oid='a', x=1, y=2)
+    s.coords['b'] = Coord(oid='b', x=3, y=4)
+    s.coords['c'] = Coord(oid='c', x=5, y=6)
+    s.refs['1'] = s.coords['a']
+    s.refs['2'] = s.coords['b']
+    s.clear_changed()
+
+    print 'out1:'
+    out = s.pack('dict')
+    pprint.pprint(out, indent=2)
+    assert out == { 'coords': { 'a': { 'oid': 'a', 'x': 1, 'y': 2},
+                                'b': { 'oid': 'b', 'x': 3, 'y': 4},
+                                'c': { 'oid': 'c', 'x': 5, 'y': 6}},
+                    'refs': { '1': 'a', '2': 'b'}}
+
+def test_ref_2():
+    s = Scene2()
+
+    s.coords['a'] = Coord(oid='a', x=1, y=2)
+    s.coords['b'] = Coord(oid='b', x=3, y=4)
+    s.coords['c'] = Coord(oid='c', x=5, y=6)
+    s.refs['1'] = s.coords['a']
+    s.refs['2'] = s.coords['b']
+    s.clear_changed()
+
+    s_out = s.pack('dict')
+    print 's:'
+    pprint.pprint(s_out, indent=2)
+
+    d = Scene2()
+    d.unpack('dict', s_out)
+    d_out = d.pack('dict')
+    print 'd:'
+    pprint.pprint(d_out, indent=2)
+
+    assert s_out == d_out
+
+    s.refs['3'] = s.coords['c']
+    s_changed = s.pack('dict', only_changed=True)
+    print 's_changed:'
+    pprint.pprint(s_changed, indent=2)
+
+    unsolved = d.unpack('dict', s_changed, mode='sync',
+                        resolve_ref=d.resolve_ref)
+    assert not unsolved  # 确保所有引用都已经解析
+
+    d_out = d.pack('dict')
+    print 'd 2:'
+    pprint.pprint(d_out, indent=2)
+    assert d_out == s.pack('dict')
+
+    s.clear_changed()
+
+    s.point1 = Point(x=1, y=2)
+    print 's 2:'
+    diff = s.pack('dict', only_changed=True)
+    pprint.pprint(diff, indent=2)
+
+    s.clear_changed()
+
+    s.coords['e'] = Coord(oid='e', x=11, y=12)
+    print 's 3:'
+    diff = s.pack('dict', only_changed=True)
+    pprint.pprint(diff, indent=2)
+
+    s.clear_changed()
+
+    print 's has_changed:', s.has_changed()
+    assert not s.has_changed()
+
+    print 's 4:'
+    diff = s.pack('dict', only_changed=True)
+    pprint.pprint(diff, indent=2)
+    assert diff == {}
+
+
+def test_id_map():
+    objects = Objects()
+    objects.objects.add(Object(oid=1, name='name1'))
+    objects.objects.add(Object(oid=2, name='name2'))
+    print 'out 1:'
+    out = objects.pack('dict')
+    pprint.pprint(out, indent=2)
+
+    # id_map不序列化oid字段。自动将整数key序列化为字符串类型。
+    assert out == { 'objects': { '1': { 'name': 'name1'}, '2': { 'name': 'name2'}}}
+
+    objects_2 = Objects()
+    objects_2.unpack('dict', out)
+    out = objects_2.pack_to_dict()
+    assert out == { 'objects': { '1': { 'name': 'name1'}, '2': { 'name': 'name2'}}}
+    # 反序列化后，对象内自动赋值oid字段。自动还原整数类型的key。
+    assert objects_2.objects[1].oid == 1
+
+
+def test_inherit():
+    class PointX(DataModel):
+        x = Field('int32', 1)
+
+    class PointY(PointX):
+        pass
+
+    class PointZ(PointY):
+        pass
+
+    class PointA(PointZ):
+        pass
+
+    point = PointA(x=1)
+    print 'out1', point.x
+    assert(point.x == 1)
+
+
+def test_auto_name():
+    obj = Object()
+    obj.name = 'the_name'
+    assert obj.get_name() == 'my_get_name'
+    obj._get_name()
+    assert obj._get_name() == 'the_name'
+
+
+def test_auto_func():
+    pt = Point()
+    pt.x = 1
+    result = pt.add_x(3)
+    print 'result 1', result
+
+    assert result[0] == 3
+    assert result[1] == 4
+    result = pt.sub_x(1)
+    print 'result 2', result
+
+    assert result[0] == 1
+    assert result[1] == 3
+    pt.y = 3
+    result = pt.sub_y(3)
+    print 'result 3', result
+
+    assert result[0] == 3
+    assert result[1] == 0
+
+    with pytest.raises(OverflowError):
+        result = pt.sub_y(1)
+
+    with pytest.raises(OverflowError):
+        result = pt.sub_x(100)
+
+
+def test_field_custom_param():
+    cc = set([field.conf_name for field in Point._fields])
+    print 'test_field_custom_param', cc
+    assert cc == set(['xx', 'yy'])
+
+
+def test_default_value():
+    coord = Coord()
+    print 'coord.x', coord.x
+    assert coord.x == 100
+
 
 def test_base_1():
     p = Point(x=1, y=2)
@@ -444,24 +464,25 @@ def test_base_usage():
 
 
 def main():
-    try:
-        test_base_1()
-        test_base_usage()
-        test_changed()
-        test_changed_2()
-        test_changed_3()
-        test_array()
-        test_map()
-        # test_ref()
-        # test_ref_2()
-        # test_id_map()
-        # test_inherit()
-        # test_auto_name()
-        # test_auto_func()
-        # test_field_custom_param()
-        # test_default_value()
-    except:
-        print_exc()
+    #try:
+    test_base_1()
+    test_base_usage()
+    test_changed()
+    test_changed_2()
+    test_changed_3()
+    test_clear_changed_1()
+    test_array()
+    test_map()
+    test_ref()
+    test_ref_2()
+    test_id_map()
+    test_inherit()
+    test_auto_name()
+    test_auto_func()
+    test_field_custom_param()
+    test_default_value()
+    #except:
+    #    print_exc()
 
 if __name__ == '__main__':
     main()

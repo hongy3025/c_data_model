@@ -1,4 +1,5 @@
 # encoding=utf-8
+# cython: embedsignature=True, unraisable_tracebacks=True
 
 '''
  DataModel
@@ -462,6 +463,7 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
     cdef bint have_data = False if only_changed else True
     cdef object fvalue
     cdef DataModel dm_obj = <DataModel>obj
+    cdef object value
 
     for field in protocol.fields_define.fields:
         value = obj_dict.get(field.key)
@@ -491,10 +493,11 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
                 for v in value
             ]
             have_data = True
+            if clear_changed:
+                _container_clear_changed(field, value, recursive=False)
         elif field.map:
             d = dict_data[field.name] = {}
-            map_value = value
-            for k, v in map_value.iteritems():
+            for k, v in value.iteritems():
                 key = kencoder(k)
                 fvalue = _field_value_to_dict(
                     encoder, field, v,
@@ -502,13 +505,15 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
                     only_changed=only_changed,
                     clear_changed=clear_changed,
                     field_filter=field_filter)
-                if fvalue != SKIP_FROM_PACK:
+                if fvalue is not SKIP_FROM_PACK:
                     d[key] = fvalue
                     have_data = True
             if only_changed:
-                for key in map_value.removed:
+                for key in (<Map>value).get_removed_set():
                     d[key] = None
                     have_data = True
+            if clear_changed:
+                _container_clear_changed(field, value, recursive=False)
         elif field.id_map:
             d = dict_data[field.name] = {}
             i_field_filter = FieldFilter(field_filter, _exclude_oid_field)
@@ -520,14 +525,16 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
                     only_changed=only_changed,
                     clear_changed=clear_changed,
                     field_filter=i_field_filter)
-                if fvalue != SKIP_FROM_PACK:
+                if fvalue is not SKIP_FROM_PACK:
                     d[key] = fvalue
                     have_data = True
                 d[key] = fvalue
             if only_changed:
-                for key in value.removed:
+                for key in (<Map>value).get_removed_set():
                     d[key] = None
                     have_data = True
+            if clear_changed:
+                _container_clear_changed(field, value, recursive=False)
         else:
             fvalue = _field_value_to_dict(
                 encoder, field, value,
@@ -535,9 +542,10 @@ cdef bint _encode_to_dict(dict dict_data, DataModelProtocol protocol, object obj
                 only_changed=only_changed,
                 clear_changed=clear_changed,
                 field_filter=field_filter)
-            if fvalue != SKIP_FROM_PACK:
+            if fvalue is not SKIP_FROM_PACK:
                 dict_data[field.name] = fvalue
                 have_data = True
+
     if clear_changed:
         (<DataModel>obj)._clear_changed(None, recursive=False)
 
@@ -553,7 +561,7 @@ cdef inline object _field_value_from_dict(Field field, object decoder,
         return _field_object_from_dict(field, None, src_dict_value, old_value, context)
 
 
-cdef _field_object_from_dict(Field field, str oid, dict src_dict_value,
+cdef _field_object_from_dict(Field field, object oid, object src_dict_value,
                              object old_value, DecodeContext context):
     cdef dict obj_dict
     if field.ref:
@@ -634,6 +642,7 @@ cdef void _decode_idmap_from_dict(Field field, dict obj_dict,
     cdef object decoder = field.dict_decoder
     cdef object kdecoder = field.dict_key_decoder
     cdef object old_value
+    cdef object oid
 
     if context.sync_mode:
         idm = obj_dict.get(field.key)
@@ -729,7 +738,7 @@ cdef class DecodeContext(object):
             self.sync_mode = False
 
 
-    cdef void add_known_object(self, str oid, object obj):
+    cdef void add_known_object(self, object oid, object obj):
         if self.resolve_ref_func is not None:
             return
         self.known_objects[oid] = obj
@@ -740,7 +749,7 @@ cdef class DecodeContext(object):
 
 
     cdef void resolve_ref(self):
-        cdef dict container
+        cdef object container
         resolve_ref_func = self.resolve_ref_func
         if resolve_ref_func is not None:
             for _, container, k, v in self.tmp_unsolved_ref:
@@ -884,6 +893,10 @@ cdef class Map(dict):
                 if _container_item_has_changed(self.field, value, recursive):
                     return True
         return False
+
+
+    cdef inline set get_removed_set(self):
+        return self.removed
 
 
     cdef inline void _clear_changed(self, bint recursive=False):
@@ -1257,7 +1270,7 @@ cdef object make_add_func(Field field):
                 cdef uint64 old_value = d.get(field.key, 0)
                 cdef uint64 new_value = old_value + value
                 d[field.key] = new_value
-                return value, new_value
+                return int(value), int(new_value)
             return _add
         else:
             def _add(object self, int64 value):
@@ -1265,7 +1278,7 @@ cdef object make_add_func(Field field):
                 cdef int64 old_value = d.get(field.key, 0)
                 cdef int64 new_value = old_value + value
                 d[field.key] = new_value
-                return value, new_value
+                return int(value), int(new_value)
             return _add
     else:
         raise TypeError("not a integer type")
@@ -1283,9 +1296,9 @@ cdef object make_sub_func_with_min_value(Field field, object _min_value=None):
                 cdef uint64 old_value = d.get(field.key, 0)
                 cdef uint64 new_value = old_value - value
                 if new_value < ui_min_value:
-                    raise ValueError('overflow lower limit')
+                    raise OverflowError('overflow lower limit')
                 d[field.key] = new_value
-                return old_value - new_value, new_value
+                return int(old_value - new_value), int(new_value)
             return _sub
         else:
             if _min_value is not None:
@@ -1295,9 +1308,9 @@ cdef object make_sub_func_with_min_value(Field field, object _min_value=None):
                 cdef int64 old_value = d.get(field.key, 0)
                 cdef int64 new_value = old_value - value
                 if new_value < i_min_value:
-                    raise ValueError('overflow lower limit')
+                    raise OverflowError('overflow lower limit')
                 d[field.key] = new_value
-                return old_value - new_value, new_value
+                return int(old_value - new_value), int(new_value)
             return _sub
     else:
         raise TypeError("not a integer type")
@@ -1393,43 +1406,46 @@ cdef class MetaDataModel(type):
 
             fields_define.add_field(field)
 
+        # 向后兼容
+        cls._fields = protocol.fields_define.fields
+
 
     def make_auto_gen_methods(cls, Field field, attrs):
         cdef str get_func_name
         if field.is_container():
             setattr(cls, field.name, property(
-                make_container_fget(field),
-                make_container_fset(field),
-                make_container_fdel(field)))
+                    make_container_fget(field),
+                    make_container_fset(field),
+                    make_container_fdel(field)))
             get_func_name = make_autogen_func_name(attrs, 'get', field.name)
             setattr(cls, get_func_name,
-                PyMethod_New(make_container_fget(field), None, cls))
+                    make_container_fget(field))
         else:
             setattr(cls, field.name, property(
-                make_fget(field),
-                make_fset(field),
-                make_fdel(field)))
+                    make_fget(field),
+                    make_fset(field),
+                    make_fdel(field)))
             get_func_name = make_autogen_func_name(attrs, 'get', field.name)
             setattr(cls, get_func_name,
-                PyMethod_New(make_get_func(field), None, cls))
+                    make_get_func(field))
 
         if field.arithm:
             # 生成 add_`name' or _add_`name' 函数
             add_func_name = make_autogen_func_name(attrs, 'add', field.name)
             setattr(cls, add_func_name,
-                PyMethod_New(make_add_func(field), None, cls))
+                    make_add_func(field))
 
             # 生成 sub_`name' or _sub_`name' 函数
             sub_func_name = make_autogen_func_name(attrs, 'sub', field.name)
             if field.has_min_value:
                 setattr(cls, sub_func_name,
-                    PyMethod_New(make_sub_func_with_min_value(field), None, cls))
+                        make_sub_func_with_min_value(field))
             elif field.is_unsigned:
                 setattr(cls, sub_func_name,
-                    PyMethod_New(make_unsigned_sub_func(field), None, cls))
+                        make_unsigned_sub_func(field))
             else:
                 setattr(cls, sub_func_name,
-                    PyMethod_New(make_signed_sub_func(field), None, cls))
+                        make_signed_sub_func(field))
 
 
 cdef class DataModel(object):
@@ -1674,11 +1690,6 @@ cdef class DataModel(object):
 
     def set_changed(self, *field_names):
         self._set_changed(field_names)
-
-
-    def is_default_value(self, field_name):
-        #return _is_default_value(self, field_name)
-        return True
 
 
     def __str__(self):
