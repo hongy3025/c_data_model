@@ -19,6 +19,11 @@ ext_modules = cythonize([
         sources=['c_data_model.pyx'],
         language='c++',
     ),
+    Extension(
+        'c_data_model_v2',
+        sources=['c_data_model_v2.pyx'],
+        language='c++',
+    ),
 ])
 
 class BuildExtSubclass(build_ext):
@@ -35,7 +40,7 @@ class BuildExtSubclass(build_ext):
             e.libraries += extra_libs
         build_ext.build_extensions(self)
 
-setup(version='0.1',
+setup(version='1.0',
       name='c_data_model',
       ext_modules=ext_modules,
       packages=[],
