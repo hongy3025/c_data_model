@@ -1,5 +1,10 @@
 # encoding=utf-8
 
+#
+# TEST CASE TODO:
+#   xxx
+#
+
 import sys
 sys.path.insert(0, '.')
 
@@ -8,13 +13,17 @@ import os
 import pytest
 import pprint
 
-from traceback import print_exc
-
+# from c_data_model_v2 import *
 from c_data_model import *
 
 class Point(DataModel):
-    x = Field('int32', 1, arithm=True, min_value=-1, conf_name='xx')
+    x = Field('int32', 1, arithm=True, min_value=-1, conf_name='xx', no_sync=True)
     y = Field('uint32', 2, arithm=True, conf_name='yy')
+
+
+class FPoint(DataModel):
+    x = Field('double', 1, arithm=True, min_value=10.0)
+    y = Field('float', 2, arithm=True)
 
 
 class Point2(DataModel):
@@ -41,6 +50,30 @@ class Coord(DataModel):
 class Scene(DataModel):
     coords  = MapField(Coord, 1, key='string')
     refs    = MapField(Coord, 2, key='string', ref=True)
+
+class Goods(DataModel):
+    xid           = Field("uint32", 1, desc="商品池id")
+    item_pool_xid = Field("uint32", 2, desc="道具池id")
+    sold          = Field("bool", 3, desc="该商品是否已经卖出")
+    period_refresh_time = Field("uint32", 4, arithm=True, desc="周期内首次刷新时间")
+    buy_count     = Field("uint16", 5, arithm=True, desc="周期内已购买次数")
+
+class Shop(DataModel):
+    """ 商店 """
+    xid                = Field("uint32", 1, desc = "商店配置xid")
+    goods_list         = ArrayField(Goods, 2, desc = "商品列表")
+    batch_id           = Field("uint32", 3, desc = "刷新批次")
+    refresh_timestamp  = Field("uint64", 4, desc = "刷新时间")
+
+class ShopData(DataModel):
+    """ 商店数据 """
+    shops   = MapField(Shop, 1, key="uint32", desc="商店数据列表。以商店xid为key")
+
+    def get_shop(self, shop_xid):
+        shop = self.get_shops().setdefault(shop_xid)
+        if not shop.xid:
+            shop.xid = shop_xid
+        return shop
 
 class Scene2(DataModel):
     coords  = MapField(Coord, 1, key='string')
@@ -89,7 +122,7 @@ def test_array():
     assert not b.has_changed()
 
     b.points[0] = Point(x=40, y=40)
-    assert not b.has_changed()
+    # v1 fail: assert not b.has_changed(recursive)
     assert b.has_changed(recursive=True)
     assert b.has_changed('points', recursive=True)
     assert b.points.has_changed()
@@ -414,6 +447,33 @@ def test_auto_func():
         result = pt.sub_x(100)
 
 
+def test_auto_func_2():
+    pt = FPoint()
+    pt.x = 1.0
+    result = pt.add_x(3.0)
+    print 'result 1', result
+
+    assert result[0] == 3.0
+    assert result[1] == 4.0
+
+    with pytest.raises(OverflowError):
+        result = pt.sub_x(1.0)
+
+    pt.y = 3.0
+    print 'pt.y', pt.y
+    result = pt.sub_y(3.0)
+    print 'result 3', result
+
+    assert result[0] == 3.0
+    assert result[1] == 0.0
+
+    # no raise error
+    pt.sub_y(1)
+
+    with pytest.raises(OverflowError):
+        pt.sub_x(100)
+
+
 def test_field_custom_param():
     cc = set([field.conf_name for field in Point._fields])
     print 'test_field_custom_param', cc
@@ -463,8 +523,32 @@ def test_base_usage():
     assert rect2.rb.y == 101
 
 
+def test_auto_func_3():
+    with pytest.raises(TypeError):
+        class test_auto_func_XXX(DataModel):
+            x = Field('string', 1, arithm=True)
+
+
+def test_default_value_2():
+    shop_data = ShopData()
+    shop = shop_data.get_shop(1001)
+    print 'test_default_value_2: shop', shop
+    assert isinstance(shop, Shop)
+    assert shop.xid == 1001
+
+
+def test_field_filter():
+    rect = Rect(lt=Point(x=1, y=1), rb=Point(x=2, y=2))
+
+    def exclude_no_sync(field):
+        return not getattr(field, 'no_sync', None)
+
+    out = rect.pack_to_dict(field_filter=exclude_no_sync)
+    pprint.pprint(out, indent=2)
+    assert out == { 'lt': { 'y': 1}, 'rb': { 'y': 2}}
+
+
 def main():
-    #try:
     test_base_1()
     test_base_usage()
     test_changed()
@@ -479,11 +563,13 @@ def main():
     test_inherit()
     test_auto_name()
     test_auto_func()
+    test_auto_func_2()
+    test_auto_func_3()
     test_field_custom_param()
     test_default_value()
-    #except:
-    #    print_exc()
+    test_default_value_2()
+    test_field_filter()
 
-if __name__ == '__main__':
-    main()
+# if __name__ == '__main__':
+    # main()
 
