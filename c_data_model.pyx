@@ -448,9 +448,9 @@ cdef void _clear_field_changed(object self, Field field, dict self_dict, bint re
         value = self_dict.get(field_key)
         if value is not None:
             if field.ref:
-                value.clear_changed(False)
+                value.clear_changed(recursive=False)
             else:
-                value.clear_changed(recursive)
+                value.clear_changed(recursive=recursive)
     elif field.is_data_model_type:
         if recursive:
             value = self_dict.get(field_key)
