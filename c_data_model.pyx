@@ -585,7 +585,7 @@ cdef object _field_value_to_dict(encoder, Field field, object value,
 
 cdef bint _encode_to_dict(dict dict_data, object cls, object obj,
                           bint recursive, bint only_changed, bint clear_changed,
-                          FieldFilter field_filter):
+                          FieldFilter field_filter, object included_fields=None):
     '''将对象数据转储到dict'''
     cdef dict obj_dict = obj.__dict__
 
@@ -597,6 +597,10 @@ cdef bint _encode_to_dict(dict dict_data, object cls, object obj,
     cdef FieldFilter i_field_filter
 
     for field in cls._fields:
+        if included_fields is not None:
+            if field.name not in included_fields:
+                continue
+
         value = obj_dict.get(field.key)
         if value is None:
             continue
@@ -627,6 +631,9 @@ cdef bint _encode_to_dict(dict dict_data, object cls, object obj,
             d = dict_data[field.name] = {}
             map_value = value
             for k, v in map_value.iteritems():
+                if only_changed:
+                    if not map_value.is_item_changed(k, v):
+                        continue
                 key = kencoder(k)
                 fvalue = _field_value_to_dict(
                     encoder, field, v,
@@ -638,13 +645,16 @@ cdef bint _encode_to_dict(dict dict_data, object cls, object obj,
                     d[key] = fvalue
                     have_data = True
             if only_changed:
-                for key in map_value.get_removed_set():
+                for key in map_value.get_removed_keys():
                     d[key] = None
                     have_data = True
         elif field.id_map:
             d = dict_data[field.name] = {}
             i_field_filter = FieldFilter(field_filter, _exclude_oid_field)
-            for _, v in value.iteritems():
+            for k, v in value.iteritems():
+                if only_changed:
+                    if not value.is_item_changed(k, v):
+                        continue
                 key = kencoder(v.oid)
                 fvalue = _field_value_to_dict(
                     encoder, field, v,
@@ -656,7 +666,7 @@ cdef bint _encode_to_dict(dict dict_data, object cls, object obj,
                     d[key] = fvalue
                     have_data = True
             if only_changed:
-                for key in value.get_removed_set():
+                for key in value.get_removed_keys():
                     d[key] = None
                     have_data = True
         else:
@@ -1094,14 +1104,15 @@ cdef class Array(list):
         self._changed = True
         self.broadcast_changed()
         if k is None:
-            return list.pop(self)
-        else:
-            return list.pop(self, k)
+            k = -1
+        x = self[k]
+        del self[k]
+        return x
 
     def remove(self, x):
         self._changed = True
         self.broadcast_changed()
-        return list.remove(self, x)
+        list.remove(self, x)
 
     def sort(self, *arg, **kwargs):
         self._changed = True
@@ -1114,19 +1125,21 @@ cdef class Array(list):
 
 cdef class Map(dict):
     cdef set _removed
-    cdef bint _changed
+    cdef set _changed
 
     def __cinit__(self, *arg, **kwargs):
         dict.__init__(self, *arg, **kwargs)
         self._removed = set()
-        self._changed = False
+        self._changed = set()
 
     cpdef void set_changed(self):
-        self._changed = True
+        self._changed.add('*')
 
     cpdef bint has_changed(self, bint recursive=False):
         if self._changed:
-            return self._changed
+            return True
+        if self._removed:
+            return True
         if recursive:
             for value in self.itervalues():
                 if _try_check_changed(value):
@@ -1134,58 +1147,69 @@ cdef class Map(dict):
         return False
 
     def clear_changed(self, recursive=False):
-        self._changed = False
+        self._changed.clear()
         self._removed.clear()
         if recursive:
             for value in self.itervalues():
                 _try_clear_changed(value)
 
     def __setitem__(self, k, v):
-        self._changed = True
-        _try_set_changed(v)
         dict.__setitem__(self, k, v)
+        _try_set_changed(v)
+        self._changed.add(k)
+        if k in self._removed:
+            self._removed.remove(k)
 
     def __delitem__(self, k):
-        self._changed = True
-        self._removed.add(k)
         dict.__delitem__(self, k)
+        self._removed.add(k)
+        if k in self._changed:
+            self._changed.remove(k)
 
     def _setitem(self, k, v):
         dict.__setitem__(self, k, v)
 
     def clear(self):
-        self._changed = True
+        self._changed.clear()
         self._removed.update(self.iterkeys())
         return dict.clear(self)
 
     def pop(self, key, *args, **kwargs):
-        self._changed = True
+        cdef object v = dict.pop(self, key, *args, **kwargs)
+        if key in self._changed:
+            self._changed.remove(key)
         self._removed.add(key)
-        return dict.pop(self, key, *args, **kwargs)
+        return v
 
     def popitem(self):
-        self._changed = True
         key, value = dict.popitem(self)
+        if key in self._changed:
+            self._changed.remove(key)
         self._removed.add(key)
         return (key, value)
 
     def setdefault(self, key, default=None):
-        self._changed = True
         if default is None:
             default = self.value_field.value_type()
+        self._changed.add(key)
         return dict.setdefault(self, key, default)
 
     def update(self, *arg, **kwargs):
-        self._changed = True
         self.broadcast_changed()
+        self._changed.add('*')
         return dict.update(self, *arg, **kwargs)
 
     def broadcast_changed(self):
         for v in self.itervalues():
             _try_set_changed(v)
 
-    def get_removed_set(self):
+    def get_removed_keys(self):
         return self._removed
+
+    def is_item_changed(self, k, v):
+        if k in self._changed:
+            return True
+        return _try_check_changed(v)
 
 
 class IdMap(Map):
@@ -1202,7 +1226,6 @@ class IdMap(Map):
 
 cdef class Field(object):
     cdef str type_name
-    cdef object value_type
     cdef bint is_data_model_type
     cdef int index
     cdef object define_in_class
@@ -1240,13 +1263,10 @@ cdef class Field(object):
         def __get__(self):
             return self.index
 
-    property value_type:
-        def __get__(self):
-            return self.value_type
-
     def __cinit__(self, object typ, int index, bint array=False, bint map=False, bint id_map=False,
                   str key=None, object default=None, object min_value=None, bint arithm=False,
-                  bint ref=False, **kwargs):
+                  bint ref=False, bint skip_changed=False, **kwargs):
+        self.value_type = None
         if isinstance(typ, (str, unicode)) and typ in _default_values:
             self.type_name = typ
             self.value_type = typ
@@ -1278,7 +1298,7 @@ cdef class Field(object):
 
         self.is_unsigned = True if self.type_name in _unsigned_types else False
         self.ref = ref
-        self.skip_changed = False
+        self.skip_changed = skip_changed
         self.create = None
 
         self.__dict__.update(kwargs)
@@ -1605,7 +1625,8 @@ class DataModel(object):
                 delattr(self, field.key)
 
     def pack_to_dict(self, recursive=True,
-                     only_changed=False, clear_changed=False, field_filter=None):
+                     only_changed=False, clear_changed=False,
+                     fields=None, field_filter=None):
         cdef dict dict_data = {}
         cdef FieldFilter ff
         if not isinstance(field_filter, FieldFilter):
@@ -1616,7 +1637,8 @@ class DataModel(object):
                         recursive=recursive,
                         only_changed=only_changed,
                         clear_changed=clear_changed,
-                        field_filter=ff)
+                        field_filter=ff,
+                        included_fields=fields)
         return dict_data
 
     def unpack_from_dict(self, dict_data, mode=None, resolve_ref=None, mark_change=False):

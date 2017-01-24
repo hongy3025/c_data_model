@@ -94,6 +94,13 @@ class Object(DataModel):
 class Objects(DataModel):
     objects = IdMapField(Object, 1, key='uint32')
 
+class MapSet(DataModel):
+    data = MapField('uint8', 1, key='uint32', desc='map set')
+
+class SkipChangedData(DataModel):
+    a = Field('uint32', 1, skip_changed=True)
+    b = Field('uint32', 2)
+
 
 def test_array():
     b = Box()
@@ -263,6 +270,15 @@ def test_map():
     out2 = kp2.pack_to_dict()
     print 'out2', out2
     assert out2 == {'points': {'a': {'y': 2, 'x': 1}}}
+
+def test_map_2():
+    m = MapSet()
+    m.get_data()[100] = 1
+    m.clear_changed(recursive=True)
+    m.get_data()[200] = 2
+    out = m.pack_to_dict(only_changed=True)
+    print 'out', out
+    assert out == {'data': {'200': 2}}
 
 
 def test_changed_3():
@@ -545,7 +561,27 @@ def test_field_filter():
 
     out = rect.pack_to_dict(field_filter=exclude_no_sync)
     pprint.pprint(out, indent=2)
-    assert out == { 'lt': { 'y': 1}, 'rb': { 'y': 2}}
+    assert out == {'lt': { 'y': 1}, 'rb': { 'y': 2}}
+
+def test_skip_changed():
+    data = SkipChangedData(a=100, b=200)
+    out = data.pack_to_dict()
+    pprint.pprint(out, indent=2)
+
+    data.a = 255
+    data.b = 256
+    out = data.pack_to_dict(only_changed=True)
+    pprint.pprint(out, indent=2)
+    assert out == {'b': 256}
+
+def test_part_pack():
+    pp = Point(x=1, y=100)
+    out = pp.pack_to_dict(fields=['x'])
+    print out
+    assert out == {'x': 1}
+    out = pp.pack_to_dict(fields=['y'])
+    print out
+    assert out == {'y': 100}
 
 
 def main():
@@ -557,6 +593,7 @@ def main():
     test_clear_changed_1()
     test_array()
     test_map()
+    test_map_2()
     test_ref()
     test_ref_2()
     test_id_map()
@@ -569,7 +606,9 @@ def main():
     test_default_value()
     test_default_value_2()
     test_field_filter()
+    test_skip_changed()
+    test_part_pack()
 
-# if __name__ == '__main__':
-    # main()
+if __name__ == '__main__':
+    main()
 
